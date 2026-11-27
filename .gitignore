@@ -32,3 +32,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Release output (goreleaser) and dependency licenses (go-licenses save)
+dist/
+third_party/
+npm/dist/

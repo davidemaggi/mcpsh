@@ -70,12 +70,22 @@ coding agent already has.**
 
 **1. Install**
 
-```sh
-go install github.com/davidemaggi/mcpsh/cmd/mcpsh@latest
-```
+| Platform | Command |
+| --- | --- |
+| macOS (Homebrew) | `brew install --cask davidemaggi/tap/mcpsh` |
+| Windows (Scoop) | `scoop bucket add davidemaggi https://github.com/davidemaggi/scoop-bucket` then `scoop install mcpsh` |
+| Linux, macOS | `curl -fsSL https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.sh \| sh` |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.ps1 \| iex` |
+| Anywhere with Node.js | `npm install -g @davidemaggi/mcpsh` |
+| From source (Go) | `go install github.com/davidemaggi/mcpsh/cmd/mcpsh@latest` |
 
-Prebuilt binaries, Homebrew, Scoop and one-line installers are coming with the first release
-([roadmap](#%EF%B8%8F-roadmap)).
+Or grab an archive from [Releases](https://github.com/davidemaggi/mcpsh/releases): every file is
+listed in `checksums.txt` and has a [build attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations)
+(`gh attestation verify <file> --repo davidemaggi/mcpsh`). On Windows, prefer the `-signed` zips:
+`mcpsh.exe` is Authenticode-signed. The install scripts, Scoop and npm pick them automatically.
+
+> **macOS:** mcpsh is not notarized yet. Homebrew and `install.sh` take care of it; if you
+> download the archive yourself, run `xattr -d com.apple.quarantine ./mcpsh` once.
 
 **2. Add a server**
 
@@ -258,7 +268,7 @@ mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextproto
 | ✅ | Background daemon: warm sessions, idle timeouts, auto-restart, concurrent calls, automatic upgrade (`--no-daemon` for CI) |
 | ✅ | Streamable HTTP and legacy SSE servers, custom headers, `tools/list_changed` |
 | ✅ | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
-| 🚧 | Releases: prebuilt binaries, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
+| ✅ | Releases: prebuilt binaries with checksums and attestations, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
 | 🔭 | OAuth for remote servers, resources and prompts, `self-update`, winget |
 
 ## 🤝 Contributing

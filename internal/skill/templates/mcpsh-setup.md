@@ -10,8 +10,13 @@ each step briefly and ask before anything that installs software or touches cred
 mcpsh version
 ```
 
-If it is missing, ask the user, then follow
-https://github.com/davidemaggi/mcpsh#-quickstart-5-minutes.
+If it is missing, ask the user, then install it with the first option that fits: macOS with
+Homebrew `brew install --cask davidemaggi/tap/mcpsh`; Windows with Scoop
+`scoop bucket add davidemaggi https://github.com/davidemaggi/scoop-bucket; scoop install mcpsh`;
+Linux or macOS `curl -fsSL https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.sh | sh`;
+Windows PowerShell `irm https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.ps1 | iex`;
+with Node.js `npm install -g @davidemaggi/mcpsh`. A new terminal may be needed before `mcpsh` is
+on the PATH.
 
 ## 2. Work out how the server runs
 

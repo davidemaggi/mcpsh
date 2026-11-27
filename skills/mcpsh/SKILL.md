@@ -57,5 +57,16 @@ progressively: do not guess tool names or parameters, ask mcpsh.
 ## If mcpsh is not installed
 
 `mcpsh` is a single executable with no runtime. Ask the user before installing anything, then
-follow https://github.com/davidemaggi/mcpsh#-quickstart-5-minutes (with Go available:
-`go install github.com/davidemaggi/mcpsh/cmd/mcpsh@latest`).
+use the first option that fits:
+
+| Platform | Command |
+| --- | --- |
+| macOS with Homebrew | `brew install --cask davidemaggi/tap/mcpsh` |
+| Windows with Scoop | `scoop bucket add davidemaggi https://github.com/davidemaggi/scoop-bucket; scoop install mcpsh` |
+| Linux, macOS | `curl -fsSL https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.sh \| sh` |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.ps1 \| iex` |
+| Node.js available | `npm install -g @davidemaggi/mcpsh` |
+
+The install scripts put mcpsh in `~/.local/bin` or `%LOCALAPPDATA%\Programs\mcpsh`; a new
+terminal may be needed before it is on the PATH. More options:
+https://github.com/davidemaggi/mcpsh#-quickstart-5-minutes.
