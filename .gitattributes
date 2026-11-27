@@ -1,0 +1,3 @@
+# Skills are installed verbatim by "npx skills add"; keep them byte-identical on every platform.
+skills/** text eol=lf
+internal/skill/templates/** text eol=lf
