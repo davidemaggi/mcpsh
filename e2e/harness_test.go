@@ -42,15 +42,30 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// env is an isolated mcpsh installation: its own config and state dirs and a project dir.
-type env struct {
-	t       *testing.T
-	root    string
-	project string
-	vars    map[string]string
+// Modes: every scenario runs in-process and through the daemon; the visible behaviour must match.
+const (
+	modeDirect = "direct"
+	modeDaemon = "daemon"
+)
+
+// eachMode runs f once per mode, each with a fresh environment.
+func eachMode(t *testing.T, f func(t *testing.T, e *env)) {
+	for _, m := range []string{modeDirect, modeDaemon} {
+		t.Run(m, func(t *testing.T) { f(t, newEnv(t, m)) })
+	}
 }
 
-func newEnv(t *testing.T) *env {
+// env is an isolated mcpsh installation: its own config and state dirs and a project dir.
+type env struct {
+	t        *testing.T
+	mode     string
+	root     string
+	project  string
+	vars     map[string]string
+	settings map[string]any
+}
+
+func newEnv(t *testing.T, mode string) *env {
 	t.Helper()
 	// Resolve symlinks (macOS: /var -> /private/var) so paths compare equal to what
 	// the processes report.
@@ -58,12 +73,27 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, root: root, project: filepath.Join(root, "project"), vars: map[string]string{}}
+	e := &env{t: t, mode: mode, root: root, project: filepath.Join(root, "project"), vars: map[string]string{},
+		settings: map[string]any{"daemonIdleTimeout": "2m"}}
 	mustMkdir(t, filepath.Join(e.project, ".git"))
 	e.vars["MCPSH_CONFIG_DIR"] = filepath.Join(root, "config")
 	e.vars["MCPSH_STATE_DIR"] = filepath.Join(root, "state")
-	e.vars["MCPSH_NO_DAEMON"] = "1"
+	if mode == modeDirect {
+		e.vars["MCPSH_NO_DAEMON"] = "1"
+	} else {
+		t.Cleanup(e.stopDaemon)
+	}
 	return e
+}
+
+// stopDaemon stops this environment's daemon (and its servers); no-op in direct mode.
+func (e *env) stopDaemon() {
+	if e.mode != modeDaemon {
+		return
+	}
+	if r := e.run("daemon", "stop"); r.code != 0 {
+		e.t.Errorf("daemon stop: %s", r)
+	}
 }
 
 func mustMkdir(t *testing.T, p string) {
@@ -75,7 +105,8 @@ func mustMkdir(t *testing.T, p string) {
 
 // userConfig writes the user config file with the given mcpServers.
 func (e *env) userConfig(servers map[string]any) {
-	e.writeJSON(filepath.Join(e.vars["MCPSH_CONFIG_DIR"], "config.json"), map[string]any{"mcpServers": servers})
+	e.writeJSON(filepath.Join(e.vars["MCPSH_CONFIG_DIR"], "config.json"),
+		map[string]any{"mcpServers": servers, "settings": e.settings})
 }
 
 func (e *env) projectConfig(servers map[string]any) string {

@@ -57,6 +57,9 @@ coding agent already has.**
   approval, destructive tools need `--yes`.
 - 🤖 **Made for agents, pleasant for humans.** Clean stdout, errors on stderr, `--output json`
   for machines, and [documented exit codes](#-exit-codes).
+- ⚡ **Warm sessions.** A per-user background daemon keeps servers running between calls, so a
+  slow `npx` server starts once, not on every command. It starts by itself, stops idle servers,
+  restarts crashed ones and gets out of the way with `--no-daemon`.
 - 🧹 **No orphans.** Every server runs in its own process tree (a job object on Windows, a process
   group on Unix) and is cleaned up completely, even behind `npx.cmd` shims.
 
@@ -121,9 +124,12 @@ Destructive tools need `--yes`: ask the user before passing it.
 | `mcpsh import [file]` | Copy servers from a `.mcp.json`-style file. |
 | `mcpsh trust [server] [--all]` | Review and approve servers defined by the project file. |
 | `mcpsh refresh [server]` | Fetch tool lists again and update the cache. |
+| `mcpsh daemon start\|stop\|restart` | Control the background daemon (it also starts by itself). |
+| `mcpsh daemon status` | Running servers with PID, uptime, calls, restarts and last error. |
+| `mcpsh daemon logs [-n 100] [-f]` | The daemon log (never contains secrets). |
 | `mcpsh version` | Version and build information. |
 
-Global flags: `-o, --output text|json`, `--timeout 30s`, `-y, --yes`.
+Global flags: `-o, --output text|json`, `--timeout 30s`, `-y, --yes`, `--no-daemon`.
 Tool names also work in kebab-case (`create-issue`), and so do parameter flags (`--page-size`).
 A parameter whose name clashes with a global flag is exposed as `--param-<name>`.
 
@@ -141,7 +147,7 @@ A parameter whose name clashes with a global flag is exposed as `--param-<name>`
 | `0` | Success |
 | `1` | The tool reported an error (`isError`) or the server rejected the call |
 | `2` | Usage, validation, configuration or trust error: fix the command or the config |
-| `3` | Connection, transport or timeout error: the server could not be reached or crashed |
+| `3` | Connection, transport, timeout or daemon error: the server could not be reached or crashed |
 
 ## ⚙️ Configuration
 
@@ -173,7 +179,7 @@ Two files, merged; the project wins:
     },
     "legacy": { "disabled": true }             // in a project file: hide a user server
   },
-  "settings": { "callTimeout": "60s", "cacheTTL": "24h" }
+  "settings": { "callTimeout": "60s", "cacheTTL": "24h", "idleTimeout": "10m", "daemonIdleTimeout": "30m" }
 }
 ```
 
@@ -203,24 +209,33 @@ Two files, merged; the project wins:
 ```mermaid
 flowchart LR
     A[Coding agent / you] -- shell --> C[mcpsh CLI]
-    C -- tools/list cache --> K[(disk cache)]
-    C -- stdio --> S1[local MCP server<br/>npx / uvx / binary]
-    C -- Streamable HTTP --> S2[remote MCP server]
+    C -- help & discovery --> K[(tool cache)]
+    C -- user-only socket / named pipe --> D[mcpsh daemon]
+    D -- stdio --> S1[local MCP servers<br/>npx / uvx / binaries]
+    D -. Streamable HTTP .-> S2[remote MCP servers]
 ```
 
+- The **CLI** is a thin client: it reads your config, expands `${VAR}` with *its own* environment,
+  validates arguments and renders results.
+- The **daemon** (one per user, started on demand) keeps one session per server definition,
+  multiplexes concurrent calls over it, stops servers after `idleTimeout`, restarts crashed ones
+  with backoff and exits after `daemonIdleTimeout`. A newer `mcpsh` replaces an older daemon
+  automatically.
+- The channel is a Unix socket in a `0700` directory, or a named pipe whose ACL admits only you.
+- `--no-daemon` (or `MCPSH_NO_DAEMON=1`) runs everything in-process with identical output and
+  exit codes: handy in CI and for debugging.
+
 mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk).
-A per-user background daemon that keeps sessions warm, so slow `npx` servers start once instead
-of on every call, is next on the roadmap. The CLI will start it transparently.
 
 ## 🗺️ Roadmap
 
 | | Feature |
 | --- | --- |
 | ✅ | Config (user + project, env interpolation, trust), stdio servers, schema-to-flags, validation, output modes, exit codes, discovery cache, destructive-tool guard, Windows-safe process trees |
-| 🚧 | Background daemon: warm sessions, idle timeouts, auto-restart, concurrent calls (`--no-daemon` for CI) |
+| ✅ | Background daemon: warm sessions, idle timeouts, auto-restart, concurrent calls, automatic upgrade (`--no-daemon` for CI) |
 | 🚧 | Streamable HTTP and legacy SSE servers, custom headers, `tools/list_changed` |
-| 🚧 | `mcpsh skill install` for Claude Code, Codex and Copilot, `mcpsh skill generate`, `mcpsh agents-md` |
-| 🚧 | Releases: prebuilt binaries, Homebrew, Scoop, install scripts, signed Windows builds |
+| 🚧 | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
+| 🚧 | Releases: prebuilt binaries, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
 | 🔭 | OAuth for remote servers, resources and prompts, `self-update`, winget |
 
 ## 🤝 Contributing
