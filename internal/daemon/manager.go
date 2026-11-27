@@ -256,6 +256,21 @@ func (m *Manager) CallTool(ctx context.Context, rs *config.Resolved, key, tool s
 	return res, err
 }
 
+// Do runs fn on the session for rs (resources, prompts): a server-side error (a JSON-RPC
+// error) still counts as a working session.
+func (m *Manager) Do(ctx context.Context, rs *config.Resolved, key string, timeout time.Duration, fn func(context.Context, *mcpclient.Conn) error) error {
+	s, c, err := m.acquire(ctx, rs, key)
+	if err != nil {
+		return err
+	}
+	cctx, cancel := withTimeout(ctx, timeout)
+	defer cancel()
+	err = fn(cctx, c)
+	var se *mcpclient.ServerError
+	m.release(s, err == nil || errors.As(err, &se))
+	return err
+}
+
 func withTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
 	if d <= 0 {
 		return context.WithCancel(ctx)

@@ -21,6 +21,10 @@ Discover, then call:
   mcpsh <server> <tool> --help         parameters of a tool
   mcpsh <server> <tool> --param value  call it (or --json '{...}', --json @file.json, --json -)
 
+Resources and prompts:
+  mcpsh resources <server> [uri]       list resources, or read one
+  mcpsh prompts <server> [prompt]      list prompts, or get one (--arg name=value)
+
 Exit codes:
   0  success
   1  the tool reported an error (isError) or the server rejected the call
@@ -64,7 +68,7 @@ func (a *App) newRoot() *cobra.Command {
 	pf.BoolVar(&a.noDaemonFlag, "no-daemon", false, "run in-process without the background daemon (also "+EnvNoDaemon+"=1)")
 
 	root.AddCommand(
-		a.listCmd(), a.daemonCmd(), a.skillCmd(), a.agentsMDCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(),
+		a.listCmd(), a.daemonCmd(), a.skillCmd(), a.agentsMDCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(), a.resourcesCmd(), a.promptsCmd(),
 	)
 	return root
 }

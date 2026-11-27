@@ -79,6 +79,46 @@ func Text(out, errOut io.Writer, res *mcp.CallToolResult, filePrefix string) err
 	return nil
 }
 
+// Resource writes the contents of a read resource: text as is, binary data saved to a
+// temporary file whose path is printed.
+func Resource(out io.Writer, res *mcp.ReadResourceResult, filePrefix string) error {
+	for _, c := range res.Contents {
+		if c == nil {
+			continue
+		}
+		if c.Blob != nil {
+			p, err := saveBinary(filePrefix, c.MIMEType, c.Blob)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "[resource %s saved to %s]\n", c.URI, p)
+			continue
+		}
+		fmt.Fprint(out, c.Text)
+		if !strings.HasSuffix(c.Text, "\n") {
+			fmt.Fprintln(out)
+		}
+	}
+	return nil
+}
+
+// Prompt writes a rendered prompt: one block per message, headed by its role.
+func Prompt(out io.Writer, res *mcp.GetPromptResult, filePrefix string) error {
+	for i, m := range res.Messages {
+		if m == nil {
+			continue
+		}
+		if i > 0 {
+			fmt.Fprintln(out)
+		}
+		fmt.Fprintf(out, "[%s]\n", m.Role)
+		if err := Text(out, out, &mcp.CallToolResult{Content: []mcp.Content{m.Content}}, filePrefix); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // JSON writes the full MCP result (content, structuredContent, isError) as indented JSON.
 func JSON(out io.Writer, v any) error {
 	enc := json.NewEncoder(out)

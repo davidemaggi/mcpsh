@@ -14,7 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/davidemaggi/mcpsh/internal/config"
+	"github.com/davidemaggi/mcpsh/internal/engine"
 	"github.com/davidemaggi/mcpsh/internal/ipc"
 	"github.com/davidemaggi/mcpsh/internal/logging"
 	"github.com/davidemaggi/mcpsh/internal/mcpclient"
@@ -205,6 +208,36 @@ func (d *daemon) dispatch(ctx context.Context, req *ipc.Request) *ipc.Response {
 			return &ipc.Response{Error: toWire(err)}
 		}
 		b, err := json.Marshal(res)
+		if err != nil {
+			return errResp(ipc.KindInternal, req.Server.Name, err.Error())
+		}
+		return &ipc.Response{Result: b}
+	case ipc.OpListResources, ipc.OpReadResource, ipc.OpListPrompts, ipc.OpGetPrompt:
+		if req.Server == nil {
+			return errResp(ipc.KindInternal, "", "missing server definition")
+		}
+		var out any
+		err := d.manager.Do(ctx, req.Server, req.Key, timeout, func(ctx context.Context, c *mcpclient.Conn) error {
+			var err error
+			switch req.Op {
+			case ipc.OpListResources:
+				var r []*mcp.Resource
+				var t []*mcp.ResourceTemplate
+				r, t, err = c.Resources(ctx)
+				out = &engine.ResourceList{Resources: r, Templates: t}
+			case ipc.OpReadResource:
+				out, err = c.ReadResource(ctx, req.URI)
+			case ipc.OpListPrompts:
+				out, err = c.Prompts(ctx)
+			case ipc.OpGetPrompt:
+				out, err = c.GetPrompt(ctx, req.Prompt, req.PromptArgs)
+			}
+			return err
+		})
+		if err != nil {
+			return &ipc.Response{Error: toWire(err)}
+		}
+		b, err := json.Marshal(out)
 		if err != nil {
 			return errResp(ipc.KindInternal, req.Server.Name, err.Error())
 		}

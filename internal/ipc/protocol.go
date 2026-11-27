@@ -13,7 +13,7 @@ import (
 )
 
 // ProtocolVersion changes whenever the messages below change incompatibly.
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 // ErrLocked: another daemon holds the lock.
 var ErrLocked = errors.New("another mcpsh daemon is running")
@@ -24,6 +24,11 @@ const (
 	OpListTools = "list_tools"
 	OpCallTool  = "call_tool"
 	OpShutdown  = "shutdown"
+	// Since protocol 2.
+	OpListResources = "list_resources"
+	OpReadResource  = "read_resource"
+	OpListPrompts   = "list_prompts"
+	OpGetPrompt     = "get_prompt"
 )
 
 // Request is one call from the CLI. One request and one response per connection; the CLI
@@ -35,11 +40,14 @@ type Request struct {
 	Server *config.Resolved `json:"server,omitempty"` // may hold secrets: never log it
 	// Key identifies the definition's origin (file + name): a new definition for the same key
 	// replaces the old session.
-	Key          string         `json:"key,omitempty"`
-	Tool         string         `json:"tool,omitempty"`
-	Args         map[string]any `json:"args,omitempty"`
-	TimeoutMs    int64          `json:"timeoutMs,omitempty"`
-	DaemonIdleMs int64          `json:"daemonIdleMs,omitempty"`
+	Key          string            `json:"key,omitempty"`
+	Tool         string            `json:"tool,omitempty"`
+	Args         map[string]any    `json:"args,omitempty"`
+	URI          string            `json:"uri,omitempty"`
+	Prompt       string            `json:"prompt,omitempty"`
+	PromptArgs   map[string]string `json:"promptArgs,omitempty"`
+	TimeoutMs    int64             `json:"timeoutMs,omitempty"`
+	DaemonIdleMs int64             `json:"daemonIdleMs,omitempty"`
 }
 
 // Response answers a Request.

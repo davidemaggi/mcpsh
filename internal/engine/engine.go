@@ -24,8 +24,22 @@ type Engine interface {
 	ListTools(ctx context.Context, rs *config.Resolved) ([]*mcp.Tool, error)
 	// CallTool calls a tool; a result with IsError is not an error.
 	CallTool(ctx context.Context, rs *config.Resolved, tool string, args map[string]any) (*mcp.CallToolResult, error)
+	// ListResources lists the server's resources and resource templates.
+	ListResources(ctx context.Context, rs *config.Resolved) (*ResourceList, error)
+	// ReadResource reads one resource.
+	ReadResource(ctx context.Context, rs *config.Resolved, uri string) (*mcp.ReadResourceResult, error)
+	// ListPrompts lists the server's prompts.
+	ListPrompts(ctx context.Context, rs *config.Resolved) ([]*mcp.Prompt, error)
+	// GetPrompt renders a prompt.
+	GetPrompt(ctx context.Context, rs *config.Resolved, name string, args map[string]string) (*mcp.GetPromptResult, error)
 	// Close releases the sessions this engine opened for the current command.
 	Close() error
+}
+
+// ResourceList is what a server offers to read.
+type ResourceList struct {
+	Resources []*mcp.Resource         `json:"resources"`
+	Templates []*mcp.ResourceTemplate `json:"resourceTemplates"`
 }
 
 // Direct connects to servers from the CLI process and closes them when the command ends.
@@ -92,6 +106,42 @@ func (d *Direct) CallTool(ctx context.Context, rs *config.Resolved, tool string,
 		return nil, err
 	}
 	return c.CallTool(ctx, tool, args)
+}
+
+func (d *Direct) ListResources(ctx context.Context, rs *config.Resolved) (*ResourceList, error) {
+	c, err := d.conn(ctx, rs)
+	if err != nil {
+		return nil, err
+	}
+	r, t, err := c.Resources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ResourceList{Resources: r, Templates: t}, nil
+}
+
+func (d *Direct) ReadResource(ctx context.Context, rs *config.Resolved, uri string) (*mcp.ReadResourceResult, error) {
+	c, err := d.conn(ctx, rs)
+	if err != nil {
+		return nil, err
+	}
+	return c.ReadResource(ctx, uri)
+}
+
+func (d *Direct) ListPrompts(ctx context.Context, rs *config.Resolved) ([]*mcp.Prompt, error) {
+	c, err := d.conn(ctx, rs)
+	if err != nil {
+		return nil, err
+	}
+	return c.Prompts(ctx)
+}
+
+func (d *Direct) GetPrompt(ctx context.Context, rs *config.Resolved, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+	c, err := d.conn(ctx, rs)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetPrompt(ctx, name, args)
 }
 
 func (d *Direct) Close() error {
