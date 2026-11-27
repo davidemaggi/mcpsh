@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -31,8 +32,29 @@ type Resolved struct {
 
 	AllowTools, DenyTools, ConfirmTools, NoConfirmTools []string
 
+	// OAuth is set for Streamable HTTP servers that may use OAuth: not disabled and without a
+	// static Authorization header.
+	OAuth *ResolvedOAuth
+	// AuthStamp changes when the stored OAuth login changes (login, logout), so that a session
+	// started with the old credentials is replaced. Set it with SetAuthStamp.
+	AuthStamp string
+
 	// ID identifies the connection: two Resolved with the same ID can share a session.
 	ID string
+}
+
+// ResolvedOAuth is the interpolated OAuth configuration.
+type ResolvedOAuth struct {
+	ClientID     string
+	ClientSecret string
+	Scopes       []string
+	RedirectPort int
+}
+
+// SetAuthStamp records the state of the stored login and updates the ID.
+func (r *Resolved) SetAuthStamp(stamp string) {
+	r.AuthStamp = stamp
+	r.ID = r.computeID()
 }
 
 // UnknownServerError is a server name that no config file defines.
@@ -123,11 +145,32 @@ func (c *Config) Resolve(name string, lookup Lookup) (*Resolved, error) {
 		}
 		r.Cwd = filepath.Clean(cwd)
 	}
+	if r.Transport == TransportHTTP && (s.OAuth == nil || !s.OAuth.Disabled) && !hasHeader(r.Headers, "Authorization") {
+		r.OAuth = &ResolvedOAuth{}
+		if o := s.OAuth; o != nil {
+			r.OAuth.Scopes, r.OAuth.RedirectPort = o.Scopes, o.RedirectPort
+			if r.OAuth.ClientID, err = exp(o.ClientID, name+".oauth.clientId"); err != nil {
+				return nil, wrap(err)
+			}
+			if r.OAuth.ClientSecret, err = exp(o.ClientSecret, name+".oauth.clientSecret"); err != nil {
+				return nil, wrap(err)
+			}
+		}
+	}
 	if s.Roots == nil || *s.Roots {
 		r.Roots = []string{c.WorkspaceRoot}
 	}
 	r.ID = r.computeID()
 	return r, nil
+}
+
+func hasHeader(h map[string]string, name string) bool {
+	for k := range h {
+		if strings.EqualFold(k, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func expandMap(m map[string]string, lookup Lookup, field string) (map[string]string, error) {
@@ -156,7 +199,9 @@ func (r *Resolved) computeID() string {
 		URL     string
 		Headers map[string]string
 		Roots   []string
-	}{r.Transport, r.Command, r.Args, r.Env, r.Cwd, r.URL, r.Headers, r.Roots})
+		OAuth   *ResolvedOAuth
+		Stamp   string
+	}{r.Transport, r.Command, r.Args, r.Env, r.Cwd, r.URL, r.Headers, r.Roots, r.OAuth, r.AuthStamp})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:16])
 }

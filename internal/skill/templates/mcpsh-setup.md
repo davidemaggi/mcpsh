@@ -42,6 +42,10 @@ prerequisite is missing, tell the user what to install; do not install it silent
 - Tell the user which variables to set and where (their shell profile, or the system
   environment on Windows). Do not ask them to paste the value into the chat.
 
+Remote servers that use OAuth (their docs mention signing in, or the first call fails with
+"requires authorization") need no token: after adding the server, ask the user to run
+`mcpsh auth login <name>` in a terminal, which opens the browser. Never handle their password.
+
 ## 4. Add the server
 
 Pick a short lowercase name (letters, digits, `-`). Choose the scope:

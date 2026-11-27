@@ -149,6 +149,7 @@ Prefer plain instructions? `mcpsh agents-md >> AGENTS.md` (or `CLAUDE.md`,
 | `mcpsh <server> <tool> [--param v ...]` | Call the tool. `mcpsh call <server> <tool>` is the explicit form. |
 | `mcpsh resources <server> [uri]` | The server's resources and URI templates, or read one (binary content is saved to a file). |
 | `mcpsh prompts <server> [prompt] [--arg name=value ...]` | The server's prompts and their arguments, or get one rendered. |
+| `mcpsh auth login\|logout <server>`, `mcpsh auth status` | Log in to OAuth servers in the browser; tokens are stored and refreshed for you. |
 | `mcpsh add <name> -- <cmd> [args]` | Add a stdio server (`--env K=V`, `--cwd`, `--scope user\|project`). |
 | `mcpsh add <name> --url <url>` | Add a remote server: Streamable HTTP, or legacy SSE with `--transport sse` (`--header "Name: value"`). |
 | `mcpsh remove <name>` | Remove a server. |
@@ -226,6 +227,28 @@ Two files, merged; the project wins:
 - Tool lists are cached on disk (`cacheTTL`, default 24h), so `--help` is instant and never
   starts a server. `mcpsh refresh` updates them.
 
+### 🔑 OAuth
+
+Remote servers that use OAuth need no configuration: log in once, mcpsh does the rest.
+
+```sh
+mcpsh add tracker --url https://mcp.example.com/mcp
+mcpsh auth login tracker    # opens the browser, stores the token
+mcpsh tracker               # works from now on, in every shell and for every agent
+mcpsh auth status           # who is logged in
+mcpsh auth logout tracker
+```
+
+- The authorization code flow with PKCE, dynamic client registration and refresh tokens, as the
+  MCP specification describes it. Tokens are refreshed automatically.
+- Calls **never** open a browser: if a server needs a login, the call fails with exit code `2`
+  and tells you to run `mcpsh auth login <server>`, so an agent cannot get stuck on a login page.
+- Tokens live in the user's state directory, encrypted with DPAPI on Windows and readable only
+  by you elsewhere; never in config files or logs.
+- A pre-registered client? `"oauth": {"clientId": "...", "clientSecret": "${SECRET}", "scopes":
+  ["read"], "redirectPort": 8765}`. A server that takes a static token? Set the `Authorization`
+  header instead, and OAuth stays off (or `"oauth": {"disabled": true}`).
+
 ## 🔒 Security by default
 
 - **No secrets in project files.** `mcpsh add --scope project` refuses clear-text values for
@@ -271,7 +294,8 @@ mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextproto
 | ✅ | Streamable HTTP and legacy SSE servers, custom headers, `tools/list_changed` |
 | ✅ | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
 | ✅ | Releases: prebuilt binaries with checksums and attestations, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
-| 🔭 | OAuth for remote servers, resources and prompts, `self-update`, winget |
+| ✅ | Resources and prompts (`mcpsh resources`, `mcpsh prompts`), OAuth for remote servers (`mcpsh auth login`) |
+| 🔭 | `self-update`, winget |
 
 ## 🤝 Contributing
 

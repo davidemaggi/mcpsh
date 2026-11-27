@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/davidemaggi/mcpsh/internal/auth"
 	"github.com/davidemaggi/mcpsh/internal/config"
 	"github.com/davidemaggi/mcpsh/internal/engine"
 	"github.com/davidemaggi/mcpsh/internal/ipc"
@@ -327,6 +328,8 @@ func fromWire(w *ipc.WireError, server string) error {
 		return &mcpclient.TransportError{Server: server, Err: errors.New(w.Message), Stderr: w.Stderr}
 	case ipc.KindTimeout:
 		return &mcpclient.TimeoutError{Server: server}
+	case ipc.KindAuth:
+		return &auth.LoginRequiredError{Server: server}
 	case ipc.KindServer:
 		return &mcpclient.ServerError{Server: server, Code: w.Code, Message: w.Message}
 	}

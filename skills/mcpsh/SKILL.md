@@ -62,7 +62,7 @@ mcpsh prompts <server> <prompt> --arg name=value
 | --- | --- | --- |
 | 0 | Success | |
 | 1 | The tool reported an error | Read stderr; fix the arguments or report the error |
-| 2 | Usage, validation, config or trust error | Fix the command (see `--help`) or the config; `mcpsh trust` for project servers |
+| 2 | Usage, validation, config or trust error | Fix the command (see `--help`) or the config; `mcpsh trust` for project servers; "requires authorization": ask the user to run `mcpsh auth login <server>` |
 | 3 | Connection, timeout or daemon error | The server is down or slow; `mcpsh daemon status`, `mcpsh daemon logs` |
 
 ## If mcpsh is not installed

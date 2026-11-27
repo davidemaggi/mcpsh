@@ -6,6 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 
+	"github.com/davidemaggi/mcpsh/internal/auth"
 	"github.com/davidemaggi/mcpsh/internal/config"
 	"github.com/davidemaggi/mcpsh/internal/daemon"
 	"github.com/davidemaggi/mcpsh/internal/mcpclient"
@@ -67,10 +68,11 @@ func ExitCode(err error) int {
 		inv *config.InvalidServerError
 		unt *config.UntrustedError
 		de  *daemon.Error
+		lre *auth.LoginRequiredError
 	)
 	switch {
 	case errors.As(err, &ue), errors.As(err, &fe), errors.As(err, &mv), errors.As(err, &unk),
-		errors.As(err, &dis), errors.As(err, &inv), errors.As(err, &unt):
+		errors.As(err, &dis), errors.As(err, &inv), errors.As(err, &unt), errors.As(err, &lre):
 		return ExitUsage
 	case errors.As(err, &sv):
 		if sv.Code == jsonrpc.CodeInvalidParams || sv.Code == jsonrpc.CodeMethodNotFound {

@@ -4,6 +4,8 @@
 //	mcpsh-testserver --http 127.0.0.1:0    serve Streamable HTTP (prints the URL on stdout)
 //	mcpsh-testserver --sse 127.0.0.1:0     serve legacy SSE (prints the URL on stdout)
 //	mcpsh-testserver --sleep               just sleep (grandchild for process-tree tests)
+//	mcpsh-testserver --http ADDR --oauth   Streamable HTTP behind a test OAuth server
+//	mcpsh-testserver <url>                 act as a browser: open url and follow the redirects
 package main
 
 import (
@@ -14,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -27,7 +30,17 @@ func main() {
 	sleep := flag.Bool("sleep", false, "sleep for an hour and exit")
 	delay := flag.Duration("startup-delay", 0, "wait before serving (slow servers)")
 	token := flag.String("require-token", "", "HTTP/SSE: answer 401 unless \"Authorization: Bearer <token>\" is sent")
+	oauth := flag.Bool("oauth", false, "HTTP: require OAuth tokens from a built-in authorization server")
+	oauthTTL := flag.Duration("oauth-ttl", time.Hour, "lifetime of the access tokens issued with --oauth")
 	flag.Parse()
+
+	// Used as $BROWSER by the login tests.
+	if u := flag.Arg(0); strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		if err := testserver.FollowRedirects(u); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	if *sleep {
 		time.Sleep(time.Hour)
@@ -47,6 +60,9 @@ func main() {
 	switch {
 	case *httpAddr != "":
 		h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+		if *oauth {
+			serveOAuth(*httpAddr, "/mcp", h, *oauthTTL)
+		}
 		serve(*httpAddr, "/mcp", requireToken(*token, h))
 	case *sseAddr != "":
 		h := mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return server }, nil)
@@ -66,6 +82,18 @@ func serve(addr, path string, h http.Handler) {
 	fmt.Printf("http://%s%s\n", ln.Addr(), path)
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
+	log.Fatal(http.Serve(ln, mux))
+}
+
+func serveOAuth(addr, path string, h http.Handler, ttl time.Duration) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	base := "http://" + ln.Addr().String()
+	fmt.Println(base + path)
+	mux := http.NewServeMux()
+	testserver.NewOAuth(base, path, ttl).Register(mux, path, h)
 	log.Fatal(http.Serve(ln, mux))
 }
 

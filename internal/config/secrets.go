@@ -32,6 +32,9 @@ func LiteralSecrets(s *Server) []string {
 			out = append(out, "headers."+k)
 		}
 	}
+	if s.OAuth != nil && s.OAuth.ClientSecret != "" && !HasReference(s.OAuth.ClientSecret) {
+		out = append(out, "oauth.clientSecret")
+	}
 	sort.Strings(out)
 	return out
 }

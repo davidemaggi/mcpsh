@@ -40,6 +40,24 @@ type Server struct {
 	IdleTimeout    Duration `json:"idleTimeout,omitempty"`
 	Roots          *bool    `json:"roots,omitempty"`
 	Disabled       bool     `json:"disabled,omitempty"`
+
+	OAuth *OAuthConfig `json:"oauth,omitempty"`
+}
+
+// OAuthConfig tunes OAuth for a remote (Streamable HTTP) server. OAuth needs no configuration:
+// a server that answers 401 with OAuth metadata is supported through dynamic client
+// registration. These fields are for servers that need a pre-registered client.
+type OAuthConfig struct {
+	// Disabled turns OAuth off (for example when the server takes a static token header).
+	Disabled bool `json:"disabled,omitempty"`
+	// ClientID and ClientSecret of a pre-registered client; the secret must be a ${VAR} reference.
+	ClientID     string `json:"clientId,omitempty"`
+	ClientSecret string `json:"clientSecret,omitempty"`
+	// Scopes to request instead of the ones the server advertises.
+	Scopes []string `json:"scopes,omitempty"`
+	// RedirectPort fixes the loopback port of the login redirect (http://127.0.0.1:<port>/callback),
+	// for clients registered with a fixed redirect URI. 0 picks a free port.
+	RedirectPort int `json:"redirectPort,omitempty"`
 }
 
 // TransportType returns the effective transport: the explicit "type", else stdio when a

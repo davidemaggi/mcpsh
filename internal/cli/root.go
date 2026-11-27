@@ -24,6 +24,7 @@ Discover, then call:
 Resources and prompts:
   mcpsh resources <server> [uri]       list resources, or read one
   mcpsh prompts <server> [prompt]      list prompts, or get one (--arg name=value)
+  mcpsh auth login <server>            log in to a remote server that uses OAuth
 
 Exit codes:
   0  success
@@ -68,7 +69,7 @@ func (a *App) newRoot() *cobra.Command {
 	pf.BoolVar(&a.noDaemonFlag, "no-daemon", false, "run in-process without the background daemon (also "+EnvNoDaemon+"=1)")
 
 	root.AddCommand(
-		a.listCmd(), a.daemonCmd(), a.skillCmd(), a.agentsMDCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(), a.resourcesCmd(), a.promptsCmd(),
+		a.listCmd(), a.daemonCmd(), a.skillCmd(), a.agentsMDCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(), a.resourcesCmd(), a.promptsCmd(), a.authCmd(),
 	)
 	return root
 }

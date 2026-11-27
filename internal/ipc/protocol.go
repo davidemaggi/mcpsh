@@ -66,6 +66,7 @@ const (
 	KindTransport = "transport"
 	KindTimeout   = "timeout"
 	KindServer    = "server"
+	KindAuth      = "auth"    // the server needs "mcpsh auth login"
 	KindUpgrade   = "upgrade" // the client is newer: the daemon is shutting down to be replaced
 	KindVersion   = "version" // the daemon is newer than the client
 	KindInternal  = "internal"
