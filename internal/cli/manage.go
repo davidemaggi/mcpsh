@@ -10,10 +10,13 @@ import (
 	"strings"
 	"sync"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/davidemaggi/mcpsh/internal/config"
+	"github.com/davidemaggi/mcpsh/internal/daemon"
+	"github.com/davidemaggi/mcpsh/internal/ipc"
 	"github.com/davidemaggi/mcpsh/internal/toolcache"
 )
 
@@ -26,6 +29,7 @@ type serverInfo struct {
 	Transport string `json:"transport"`
 	Target    string `json:"target"`
 	Tools     *int   `json:"tools,omitempty"`
+	Pid       int    `json:"pid,omitempty"`
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
 }
@@ -51,6 +55,7 @@ With --check every server is contacted and its tool list refreshed.`,
 			}
 			names := cfg.Names()
 			infos := make([]serverInfo, len(names))
+			ids := make([]string, len(names)) // resolved IDs, to match daemon sessions
 			var wg sync.WaitGroup
 			for i, name := range names {
 				e := cfg.Servers[name]
@@ -69,6 +74,7 @@ With --check every server is contacted and its tool list refreshed.`,
 					info.Status = "error"
 					info.Error = rerr.Error()
 				default:
+					ids[i] = rs.ID
 					if c := toolcache.Get(rs.ID); c != nil {
 						n := len(filterTools(c.Tools, rs))
 						info.Tools = &n
@@ -92,6 +98,7 @@ With --check every server is contacted and its tool list refreshed.`,
 				infos[i] = info
 			}
 			wg.Wait()
+			a.addSessionStates(cmd.Context(), infos, ids)
 			if a.jsonOutput() {
 				return writeJSON(a.Stdout, infos)
 			}
@@ -107,6 +114,9 @@ With --check every server is contacted and its tool list refreshed.`,
 					tools = fmt.Sprint(*in.Tools)
 				}
 				status := in.Status
+				if in.Pid > 0 {
+					status += fmt.Sprintf(" (pid %d)", in.Pid)
+				}
 				if in.Error != "" {
 					status += " (" + truncate(in.Error, 80) + ")"
 				}
@@ -117,6 +127,39 @@ With --check every server is contacted and its tool list refreshed.`,
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "connect to every server and refresh its tool list")
 	return cmd
+}
+
+// addSessionStates shows what the daemon is doing with each server, without starting it.
+func (a *App) addSessionStates(ctx context.Context, infos []serverInfo, ids []string) {
+	if a.noDaemon {
+		return
+	}
+	sctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	st, err := daemon.NewClient(0).Status(sctx)
+	if err != nil {
+		return
+	}
+	byID := map[string]ipc.SessionStatus{}
+	for _, s := range st.Sessions {
+		byID[s.ID] = s
+	}
+	for i := range infos {
+		s, ok := byID[ids[i]]
+		if !ok || ids[i] == "" || infos[i].Status != "ready" && infos[i].Status != "ok" {
+			continue
+		}
+		infos[i].Pid = s.Pid
+		switch s.State {
+		case "running":
+			infos[i].Status = "running"
+		case "crashed":
+			infos[i].Status = "crashed"
+			infos[i].Error = s.LastError
+		default:
+			infos[i].Status = s.State
+		}
+	}
 }
 
 // rawTarget describes a server from its uninterpolated definition (never shows secret values).

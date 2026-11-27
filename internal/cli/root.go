@@ -25,7 +25,10 @@ Exit codes:
   0  success
   1  the tool reported an error (isError) or the server rejected the call
   2  usage, validation, configuration or trust error
-  3  connection, transport or timeout error`
+  3  connection, transport, timeout or daemon error
+
+The first call starts a background daemon that keeps server sessions warm.
+Use --no-daemon (or MCPSH_NO_DAEMON=1) to run everything in-process.`
 
 func (a *App) newRoot() *cobra.Command {
 	root := &cobra.Command{
@@ -36,11 +39,11 @@ func (a *App) newRoot() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if a.noDaemonFlag {
+				a.noDaemon = true
+			}
 			if a.output != "text" && a.output != "json" {
 				return usagef("", fmt.Sprintf("--output must be text or json, not %q", a.output))
-			}
-			if envTrue(a.Lookup, EnvNoDaemon) {
-				a.noDaemon = true
 			}
 			return nil
 		},
@@ -58,10 +61,10 @@ func (a *App) newRoot() *cobra.Command {
 	pf.StringVarP(&a.output, "output", "o", "text", "output format: text or json")
 	pf.DurationVar(&a.timeout, "timeout", 0, "timeout for the tool call (e.g. 30s, 2m); default from config, else 60s")
 	pf.BoolVarP(&a.yes, "yes", "y", false, "confirm tools marked as destructive without prompting")
-	pf.BoolVar(&a.noDaemon, "no-daemon", false, "run in-process without the background daemon (also "+EnvNoDaemon+"=1)")
+	pf.BoolVar(&a.noDaemonFlag, "no-daemon", false, "run in-process without the background daemon (also "+EnvNoDaemon+"=1)")
 
 	root.AddCommand(
-		a.listCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(),
+		a.listCmd(), a.daemonCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(),
 	)
 	return root
 }
@@ -137,9 +140,13 @@ func (a *App) preparseGlobals(args []string) error {
 	var out string
 	fs.StringVarP(&out, "output", "o", "text", "")
 	fs.DurationVar(&a.timeout, "timeout", 0, "")
+	noDaemon := fs.Bool("no-daemon", false, "")
 	fs.BoolP("help", "h", false, "")
 	if err := fs.Parse(args); err != nil {
 		return usagef("see mcpsh --help", err.Error())
+	}
+	if *noDaemon {
+		a.noDaemon = true
 	}
 	return nil
 }

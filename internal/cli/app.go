@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/davidemaggi/mcpsh/internal/config"
+	"github.com/davidemaggi/mcpsh/internal/daemon"
 	"github.com/davidemaggi/mcpsh/internal/engine"
 	"github.com/davidemaggi/mcpsh/internal/platform"
 )
@@ -33,10 +34,11 @@ type App struct {
 	Interactive bool
 
 	// Global flags.
-	output   string
-	timeout  time.Duration
-	yes      bool
-	noDaemon bool
+	output       string
+	timeout      time.Duration
+	yes          bool
+	noDaemon     bool // effective: flag or environment
+	noDaemonFlag bool
 
 	logger *slog.Logger
 	debug  bool
@@ -61,6 +63,7 @@ func NewApp() *App {
 // Run executes the command line and returns the exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	a.debug = envTrue(a.Lookup, EnvDebug)
+	a.noDaemon = envTrue(a.Lookup, EnvNoDaemon)
 	if a.debug {
 		a.logger = slog.New(slog.NewTextHandler(a.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	} else {
@@ -106,16 +109,29 @@ func (a *App) trustStore() (*config.TrustStore, error) {
 	return ts, nil
 }
 
-// engine returns the engine for this command. Phase 1: always in-process.
+// engine returns the engine for this command: the daemon client, or in-process sessions with
+// --no-daemon / MCPSH_NO_DAEMON=1.
 func (a *App) engine() engine.Engine {
-	if a.eng == nil {
+	if a.eng != nil {
+		return a.eng
+	}
+	if a.noDaemon {
 		var serverStderr io.Writer
 		if a.debug {
 			serverStderr = a.Stderr
 		}
 		a.eng = engine.NewDirect(a.logger, serverStderr)
+		return a.eng
 	}
+	a.eng = daemon.NewClient(a.daemonIdle())
 	return a.eng
+}
+
+func (a *App) daemonIdle() time.Duration {
+	if cfg, err := a.config(); err == nil {
+		return cfg.Settings.DaemonIdleTimeout.Or(config.DefaultDaemonIdleTimeout)
+	}
+	return config.DefaultDaemonIdleTimeout
 }
 
 // resolve returns a usable, trusted server definition.

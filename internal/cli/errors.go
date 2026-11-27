@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 
 	"github.com/davidemaggi/mcpsh/internal/config"
+	"github.com/davidemaggi/mcpsh/internal/daemon"
 	"github.com/davidemaggi/mcpsh/internal/mcpclient"
 )
 
@@ -65,6 +66,7 @@ func ExitCode(err error) int {
 		dis *config.DisabledServerError
 		inv *config.InvalidServerError
 		unt *config.UntrustedError
+		de  *daemon.Error
 	)
 	switch {
 	case errors.As(err, &ue), errors.As(err, &fe), errors.As(err, &mv), errors.As(err, &unk),
@@ -75,8 +77,8 @@ func ExitCode(err error) int {
 			return ExitUsage
 		}
 		return ExitTool
-	case errors.As(err, &ce), errors.As(err, &te), errors.As(err, &toe),
-		errors.Is(err, context.DeadlineExceeded):
+	case errors.As(err, &ce), errors.As(err, &te), errors.As(err, &toe), errors.As(err, &de),
+		errors.Is(err, daemon.ErrNotRunning), errors.Is(err, context.DeadlineExceeded):
 		return ExitTransport
 	case errors.Is(err, context.Canceled):
 		return 130
