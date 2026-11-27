@@ -257,6 +257,8 @@ jobs:
           HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
         run: |
           brew tap-new --no-git ci/local
+          # Newer Homebrew refuses casks from taps it was not told to trust
+          if brew commands | grep -qx trust; then brew trust ci/local; fi
           tapdir="$(brew --repository)/Library/Taps/ci/homebrew-local"
           mkdir -p "$tapdir/Casks" && cp out/homebrew/Casks/mcpsh.rb "$tapdir/Casks/"
           brew style --cask ci/local/mcpsh
