@@ -83,6 +83,9 @@ Prebuilt binaries, Homebrew, Scoop and one-line installers are coming with the f
 # a local (stdio) server
 mcpsh add fs -- npx -y @modelcontextprotocol/server-filesystem .
 
+# a remote server, token from the environment
+mcpsh add github --url https://api.githubcopilot.com/mcp/ --header 'Authorization: Bearer ${GITHUB_TOKEN}'
+
 # or reuse what you already have
 mcpsh import .mcp.json
 ```
@@ -119,7 +122,7 @@ Destructive tools need `--yes`: ask the user before passing it.
 | `mcpsh <server> <tool> --schema` | The raw input and output JSON Schema. |
 | `mcpsh <server> <tool> [--param v ...]` | Call the tool. `mcpsh call <server> <tool>` is the explicit form. |
 | `mcpsh add <name> -- <cmd> [args]` | Add a stdio server (`--env K=V`, `--cwd`, `--scope user\|project`). |
-| `mcpsh add <name> --url <url>` | Add a remote server (`--header "Name: value"`). Connecting to remote servers lands in the next release. |
+| `mcpsh add <name> --url <url>` | Add a remote server: Streamable HTTP, or legacy SSE with `--transport sse` (`--header "Name: value"`). |
 | `mcpsh remove <name>` | Remove a server. |
 | `mcpsh import [file]` | Copy servers from a `.mcp.json`-style file. |
 | `mcpsh trust [server] [--all]` | Review and approve servers defined by the project file. |
@@ -183,8 +186,8 @@ Two files, merged; the project wins:
 }
 ```
 
-- Remote servers (`"type": "http"` or `"sse"`) can already be configured; connecting to them
-  lands in the next release (see the [roadmap](#%EF%B8%8F-roadmap)).
+- Remote servers use `"type": "http"` (Streamable HTTP, the default with a `url`) or `"sse"`
+  (legacy SSE); `headers` are sent with every request.
 - `${VAR}` and `${VAR:-default}` are expanded from the environment in `command`, `args`, `env`,
   `cwd`, `url` and `headers`. A missing variable is a clear error, never an empty secret.
 - A project server with the same name replaces the user server entirely.
@@ -212,14 +215,15 @@ flowchart LR
     C -- help & discovery --> K[(tool cache)]
     C -- user-only socket / named pipe --> D[mcpsh daemon]
     D -- stdio --> S1[local MCP servers<br/>npx / uvx / binaries]
-    D -. Streamable HTTP .-> S2[remote MCP servers]
+    D -- Streamable HTTP / SSE --> S2[remote MCP servers]
 ```
 
 - The **CLI** is a thin client: it reads your config, expands `${VAR}` with *its own* environment,
   validates arguments and renders results.
 - The **daemon** (one per user, started on demand) keeps one session per server definition,
   multiplexes concurrent calls over it, stops servers after `idleTimeout`, restarts crashed ones
-  with backoff and exits after `daemonIdleTimeout`. A newer `mcpsh` replaces an older daemon
+  with backoff, refreshes the tool cache when a server announces `tools/list_changed`, and exits
+  after `daemonIdleTimeout`. A newer `mcpsh` replaces an older daemon
   automatically.
 - The channel is a Unix socket in a `0700` directory, or a named pipe whose ACL admits only you.
 - `--no-daemon` (or `MCPSH_NO_DAEMON=1`) runs everything in-process with identical output and
@@ -233,7 +237,7 @@ mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextproto
 | --- | --- |
 | ✅ | Config (user + project, env interpolation, trust), stdio servers, schema-to-flags, validation, output modes, exit codes, discovery cache, destructive-tool guard, Windows-safe process trees |
 | ✅ | Background daemon: warm sessions, idle timeouts, auto-restart, concurrent calls, automatic upgrade (`--no-daemon` for CI) |
-| 🚧 | Streamable HTTP and legacy SSE servers, custom headers, `tools/list_changed` |
+| ✅ | Streamable HTTP and legacy SSE servers, custom headers, `tools/list_changed` |
 | 🚧 | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
 | 🚧 | Releases: prebuilt binaries, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
 | 🔭 | OAuth for remote servers, resources and prompts, `self-update`, winget |
