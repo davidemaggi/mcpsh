@@ -163,6 +163,7 @@ Prefer plain instructions? `mcpsh agents-md >> AGENTS.md` (or `CLAUDE.md`,
 | `mcpsh skill generate <server> [--description "..."]` | Write a skill for one server, so agents know when to use it. |
 | `mcpsh agents-md` | Print a snippet for `AGENTS.md` / `CLAUDE.md` / `copilot-instructions.md`. |
 | `mcpsh version` | Version and build information. |
+| `mcpsh self-update [--check] [--version X]` | Update to the latest release (checksum-verified; the signed build on Windows). Package-manager installs are told which command to use instead. |
 
 Global flags: `-o, --output text|json`, `--timeout 30s`, `-y, --yes`, `--no-daemon`.
 Tool names also work in kebab-case (`create-issue`), and so do parameter flags (`--page-size`).
@@ -295,7 +296,8 @@ mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextproto
 | ✅ | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
 | ✅ | Releases: prebuilt binaries with checksums and attestations, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
 | ✅ | Resources and prompts (`mcpsh resources`, `mcpsh prompts`), OAuth for remote servers (`mcpsh auth login`) |
-| 🔭 | `self-update`, winget |
+| ✅ | `mcpsh self-update` |
+| 🔭 | winget |
 
 ## 🤝 Contributing
 
