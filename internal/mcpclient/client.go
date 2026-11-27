@@ -200,6 +200,82 @@ func (c *Conn) CallTool(ctx context.Context, name string, args map[string]any) (
 	return res, nil
 }
 
+// capabilities returns what the server declared at initialization (never nil).
+func (c *Conn) capabilities() *mcp.ServerCapabilities {
+	if r := c.Session.InitializeResult(); r != nil && r.Capabilities != nil {
+		return r.Capabilities
+	}
+	return &mcp.ServerCapabilities{}
+}
+
+// Resources lists the server's resources and resource templates, following pagination.
+// A server without the resources capability has none.
+func (c *Conn) Resources(ctx context.Context) ([]*mcp.Resource, []*mcp.ResourceTemplate, error) {
+	if c.capabilities().Resources == nil {
+		return nil, nil, nil
+	}
+	var resources []*mcp.Resource
+	for r, err := range c.Session.Resources(ctx, nil) {
+		if err != nil {
+			return nil, nil, c.classify(ctx, err)
+		}
+		resources = append(resources, r)
+	}
+	var templates []*mcp.ResourceTemplate
+	for t, err := range c.Session.ResourceTemplates(ctx, nil) {
+		if err != nil {
+			// Templates are optional: a server may not implement the method at all.
+			var we *jsonrpc.Error
+			if errors.As(err, &we) && we.Code == jsonrpc.CodeMethodNotFound {
+				break
+			}
+			return nil, nil, c.classify(ctx, err)
+		}
+		templates = append(templates, t)
+	}
+	return resources, templates, nil
+}
+
+// ReadResource reads one resource by URI.
+func (c *Conn) ReadResource(ctx context.Context, uri string) (*mcp.ReadResourceResult, error) {
+	if c.capabilities().Resources == nil {
+		return nil, &ServerError{Server: c.Server.Name, Code: jsonrpc.CodeMethodNotFound, Message: "the server has no resources"}
+	}
+	res, err := c.Session.ReadResource(ctx, &mcp.ReadResourceParams{URI: uri})
+	if err != nil {
+		return nil, c.classify(ctx, err)
+	}
+	return res, nil
+}
+
+// Prompts lists the server's prompts, following pagination. A server without the prompts
+// capability has none.
+func (c *Conn) Prompts(ctx context.Context) ([]*mcp.Prompt, error) {
+	if c.capabilities().Prompts == nil {
+		return nil, nil
+	}
+	var prompts []*mcp.Prompt
+	for p, err := range c.Session.Prompts(ctx, nil) {
+		if err != nil {
+			return nil, c.classify(ctx, err)
+		}
+		prompts = append(prompts, p)
+	}
+	return prompts, nil
+}
+
+// GetPrompt renders a prompt with its arguments.
+func (c *Conn) GetPrompt(ctx context.Context, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+	if c.capabilities().Prompts == nil {
+		return nil, &ServerError{Server: c.Server.Name, Code: jsonrpc.CodeMethodNotFound, Message: "the server has no prompts"}
+	}
+	res, err := c.Session.GetPrompt(ctx, &mcp.GetPromptParams{Name: name, Arguments: args})
+	if err != nil {
+		return nil, c.classify(ctx, err)
+	}
+	return res, nil
+}
+
 // Close ends the session and terminates a stdio server's whole process tree.
 func (c *Conn) Close() error {
 	var err error

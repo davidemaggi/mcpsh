@@ -186,7 +186,53 @@ func New(exe string) *mcp.Server {
 				})
 			return text("tool added"), nil, nil
 		})
+
+	addResourcesAndPrompts(s)
 	return s
+}
+
+// addResourcesAndPrompts: a text resource, a binary one, a template and two prompts.
+func addResourcesAndPrompts(s *mcp.Server) {
+	s.AddResource(&mcp.Resource{URI: "test://readme", Name: "readme", Title: "Read me",
+		Description: "A short text resource.", MIMEType: "text/markdown"},
+		func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{
+				{URI: req.Params.URI, MIMEType: "text/markdown", Text: "# mcpsh test server\n"},
+			}}, nil
+		})
+	s.AddResource(&mcp.Resource{URI: "test://logo", Name: "logo", Description: "A 2x2 PNG image.", MIMEType: "image/png"},
+		func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{
+				{URI: req.Params.URI, MIMEType: "image/png", Blob: tinyPNG()},
+			}}, nil
+		})
+	s.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: "test://items/{id}", Name: "item", Description: "One item by id."},
+		func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+			id := strings.TrimPrefix(req.Params.URI, "test://items/")
+			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{
+				{URI: req.Params.URI, MIMEType: "text/plain", Text: "item " + id},
+			}}, nil
+		})
+
+	s.AddPrompt(&mcp.Prompt{Name: "greet", Description: "Greet someone.", Arguments: []*mcp.PromptArgument{
+		{Name: "name", Description: "who to greet", Required: true},
+		{Name: "style", Description: "formal or casual"},
+	}}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		greeting := "Hi"
+		if req.Params.Arguments["style"] == "formal" {
+			greeting = "Good morning"
+		}
+		return &mcp.GetPromptResult{Description: "a greeting", Messages: []*mcp.PromptMessage{
+			{Role: "user", Content: &mcp.TextContent{Text: greeting + ", " + req.Params.Arguments["name"] + "!"}},
+			{Role: "assistant", Content: &mcp.TextContent{Text: "Hello!"}},
+		}}, nil
+	})
+	s.AddPrompt(&mcp.Prompt{Name: "plain", Description: "A prompt without arguments."},
+		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{
+				{Role: "user", Content: &mcp.TextContent{Text: "plain prompt"}},
+			}}, nil
+		})
 }
 
 func text(s string) *mcp.CallToolResult {

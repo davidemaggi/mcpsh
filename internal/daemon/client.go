@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/davidemaggi/mcpsh/internal/config"
+	"github.com/davidemaggi/mcpsh/internal/engine"
 	"github.com/davidemaggi/mcpsh/internal/ipc"
 	"github.com/davidemaggi/mcpsh/internal/mcpclient"
 )
@@ -65,6 +66,54 @@ func (c *Client) CallTool(ctx context.Context, rs *config.Resolved, tool string,
 		return nil, &Error{Msg: "daemon sent an unreadable result: " + err.Error()}
 	}
 	return &res, nil
+}
+
+// ListResources implements engine.Engine.
+func (c *Client) ListResources(ctx context.Context, rs *config.Resolved) (*engine.ResourceList, error) {
+	var out engine.ResourceList
+	if err := c.requestInto(ctx, rs, &ipc.Request{Op: ipc.OpListResources, Server: rs}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ReadResource implements engine.Engine.
+func (c *Client) ReadResource(ctx context.Context, rs *config.Resolved, uri string) (*mcp.ReadResourceResult, error) {
+	var out mcp.ReadResourceResult
+	if err := c.requestInto(ctx, rs, &ipc.Request{Op: ipc.OpReadResource, Server: rs, URI: uri}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListPrompts implements engine.Engine.
+func (c *Client) ListPrompts(ctx context.Context, rs *config.Resolved) ([]*mcp.Prompt, error) {
+	var out []*mcp.Prompt
+	if err := c.requestInto(ctx, rs, &ipc.Request{Op: ipc.OpListPrompts, Server: rs}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetPrompt implements engine.Engine.
+func (c *Client) GetPrompt(ctx context.Context, rs *config.Resolved, name string, args map[string]string) (*mcp.GetPromptResult, error) {
+	var out mcp.GetPromptResult
+	if err := c.requestInto(ctx, rs, &ipc.Request{Op: ipc.OpGetPrompt, Server: rs, Prompt: name, PromptArgs: args}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// requestInto sends a request and decodes its result into out.
+func (c *Client) requestInto(ctx context.Context, rs *config.Resolved, req *ipc.Request, out any) error {
+	resp, err := c.request(ctx, rs, req)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(resp.Result, out); err != nil {
+		return &Error{Msg: "daemon sent an unreadable result: " + err.Error()}
+	}
+	return nil
 }
 
 // request sends a server request. The ctx deadline becomes the daemon-side timeout of the

@@ -147,6 +147,8 @@ Prefer plain instructions? `mcpsh agents-md >> AGENTS.md` (or `CLAUDE.md`,
 | `mcpsh <server> <tool> --help` | Full description, annotations and the flags generated from the input schema. |
 | `mcpsh <server> <tool> --schema` | The raw input and output JSON Schema. |
 | `mcpsh <server> <tool> [--param v ...]` | Call the tool. `mcpsh call <server> <tool>` is the explicit form. |
+| `mcpsh resources <server> [uri]` | The server's resources and URI templates, or read one (binary content is saved to a file). |
+| `mcpsh prompts <server> [prompt] [--arg name=value ...]` | The server's prompts and their arguments, or get one rendered. |
 | `mcpsh add <name> -- <cmd> [args]` | Add a stdio server (`--env K=V`, `--cwd`, `--scope user\|project`). |
 | `mcpsh add <name> --url <url>` | Add a remote server: Streamable HTTP, or legacy SSE with `--transport sse` (`--header "Name: value"`). |
 | `mcpsh remove <name>` | Remove a server. |

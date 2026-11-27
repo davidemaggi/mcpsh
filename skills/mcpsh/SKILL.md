@@ -36,6 +36,17 @@ progressively: do not guess tool names or parameters, ask mcpsh.
      (`content`, `structuredContent`, `isError`).
    - Images and other binary content are saved to a file; the path is printed.
 
+## Resources and prompts
+
+Some servers also offer data to read (resources) and prompt templates:
+
+```sh
+mcpsh resources <server>                 # resources and URI templates
+mcpsh resources <server> <uri>           # read one (binary content is saved to a file)
+mcpsh prompts <server>                   # prompts; arguments marked * are required
+mcpsh prompts <server> <prompt> --arg name=value
+```
+
 ## Rules
 
 - **Destructive tools** (marked `[destructive]` in `mcpsh <server>`) refuse to run without
