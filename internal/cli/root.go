@@ -64,7 +64,7 @@ func (a *App) newRoot() *cobra.Command {
 	pf.BoolVar(&a.noDaemonFlag, "no-daemon", false, "run in-process without the background daemon (also "+EnvNoDaemon+"=1)")
 
 	root.AddCommand(
-		a.listCmd(), a.daemonCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(),
+		a.listCmd(), a.daemonCmd(), a.skillCmd(), a.agentsMDCmd(), a.addCmd(), a.removeCmd(), a.importCmd(), a.trustCmd(), a.refreshCmd(), a.versionCmd(), a.callCmd(),
 	)
 	return root
 }

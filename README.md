@@ -100,17 +100,33 @@ mcpsh fs read_text_file --path README.md     # call it
 mcpsh fs list_directory --path . -o json     # full MCP result as JSON
 ```
 
-**4. Teach your agent** — add this to `AGENTS.md`, `CLAUDE.md` or
-`.github/copilot-instructions.md` (a `mcpsh skill install` command that does it for you is on the
-[roadmap](#%EF%B8%8F-roadmap)):
+**4. Teach your agent**
 
-```markdown
-## MCP tools
-MCP servers are available through the `mcpsh` CLI. Discover before calling:
-`mcpsh list`, then `mcpsh <server>`, then `mcpsh <server> <tool> --help`.
-Call with `mcpsh <server> <tool> --param value`; use `--output json` to process results.
-Destructive tools need `--yes`: ask the user before passing it.
+```sh
+mcpsh skill install                         # Claude Code, Codex and Copilot, for your user
+mcpsh skill install --scope project         # or commit them with the repository
 ```
+
+…or with the [skills CLI](https://github.com/vercel-labs/skills), without installing mcpsh first
+(the skill offers to install it when it is missing):
+
+```sh
+npx skills add davidemaggi/mcpsh
+```
+
+You get two [Agent Skills](https://agentskills.io):
+
+- **`mcpsh`** teaches the agent to discover progressively (`mcpsh list` → `mcpsh <server>` →
+  `mcpsh <server> <tool> --help`) and call tools, with `--output json` when it needs to process
+  the result. No tool catalogue is loaded into the context up front.
+- **`mcpsh-setup`** configures new servers for you: hand your agent an npm or PyPI package, a
+  Docker image, a URL, a README or a `.mcp.json` snippet and say *"set this up with mcpsh"*. It
+  picks the transport, keeps secrets in `${VAR}` references, chooses the scope, verifies the
+  connection and suggests tool filters.
+
+Prefer plain instructions? `mcpsh agents-md >> AGENTS.md` (or `CLAUDE.md`,
+`.github/copilot-instructions.md`). Want the agent to know *when* to reach for a specific server?
+`mcpsh skill generate <server>`.
 
 ## 🧰 Commands
 
@@ -130,6 +146,9 @@ Destructive tools need `--yes`: ask the user before passing it.
 | `mcpsh daemon start\|stop\|restart` | Control the background daemon (it also starts by itself). |
 | `mcpsh daemon status` | Running servers with PID, uptime, calls, restarts and last error. |
 | `mcpsh daemon logs [-n 100] [-f]` | The daemon log (never contains secrets). |
+| `mcpsh skill install [--target claude\|codex\|copilot\|all] [--scope user\|project]` | Install the `mcpsh` and `mcpsh-setup` Agent Skills. |
+| `mcpsh skill generate <server> [--description "..."]` | Write a skill for one server, so agents know when to use it. |
+| `mcpsh agents-md` | Print a snippet for `AGENTS.md` / `CLAUDE.md` / `copilot-instructions.md`. |
 | `mcpsh version` | Version and build information. |
 
 Global flags: `-o, --output text|json`, `--timeout 30s`, `-y, --yes`, `--no-daemon`.
@@ -238,7 +257,7 @@ mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextproto
 | ✅ | Config (user + project, env interpolation, trust), stdio servers, schema-to-flags, validation, output modes, exit codes, discovery cache, destructive-tool guard, Windows-safe process trees |
 | ✅ | Background daemon: warm sessions, idle timeouts, auto-restart, concurrent calls, automatic upgrade (`--no-daemon` for CI) |
 | ✅ | Streamable HTTP and legacy SSE servers, custom headers, `tools/list_changed` |
-| 🚧 | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
+| ✅ | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
 | 🚧 | Releases: prebuilt binaries, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
 | 🔭 | OAuth for remote servers, resources and prompts, `self-update`, winget |
 
