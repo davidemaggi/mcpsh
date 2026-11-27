@@ -33,8 +33,8 @@ func (e *UsageError) Error() string {
 
 func usagef(hint, msg string) error { return &UsageError{Msg: msg, Hint: hint} }
 
-// toolFailed is returned after an isError result has been printed.
-var toolFailed = errors.New("tool returned an error")
+// errToolFailed is returned after an isError result has been printed.
+var errToolFailed = errors.New("tool returned an error")
 
 // silentError carries an exit code for an error that has already been reported.
 type silentError struct{ code int }
@@ -50,7 +50,7 @@ func ExitCode(err error) int {
 	if errors.As(err, &se) {
 		return se.code
 	}
-	if errors.Is(err, toolFailed) {
+	if errors.Is(err, errToolFailed) {
 		return ExitTool
 	}
 	var (

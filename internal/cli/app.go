@@ -72,7 +72,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	}
 	code := ExitCode(err)
 	var se *silentError
-	if err != nil && !errors.Is(err, toolFailed) && !errors.As(err, &se) {
+	if err != nil && !errors.Is(err, errToolFailed) && !errors.As(err, &se) {
 		fmt.Fprintln(a.Stderr, "mcpsh: "+strings.TrimSpace(err.Error()))
 	}
 	return code

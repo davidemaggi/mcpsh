@@ -94,7 +94,7 @@ func (a *App) runTool(ctx context.Context, rs *config.Resolved, t *mcp.Tool, spe
 		return err
 	}
 	if res.IsError {
-		return toolFailed
+		return errToolFailed
 	}
 	return nil
 }

@@ -18,7 +18,7 @@ func TestExitCode(t *testing.T) {
 		code int
 	}{
 		{nil, ExitOK},
-		{toolFailed, ExitTool},
+		{errToolFailed, ExitTool},
 		{usagef("", "x"), ExitUsage},
 		{fmt.Errorf("wrapped: %w", &config.MissingVarError{Var: "X"}), ExitUsage},
 		{&config.UntrustedError{Name: "p"}, ExitUsage},

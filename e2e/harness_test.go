@@ -52,7 +52,12 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	root := t.TempDir()
+	// Resolve symlinks (macOS: /var -> /private/var) so paths compare equal to what
+	// the processes report.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	e := &env{t: t, root: root, project: filepath.Join(root, "project"), vars: map[string]string{}}
 	mustMkdir(t, filepath.Join(e.project, ".git"))
 	e.vars["MCPSH_CONFIG_DIR"] = filepath.Join(root, "config")
