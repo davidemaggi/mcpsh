@@ -6,7 +6,8 @@ name: Release
 #   3. sign             Authenticode-signs mcpsh.exe on the self-hosted runner, which never checks
 #                       out or builds code: it signs files built here and hands them back
 #   4. publish-signed   adds the -signed zips, checksums-signed.txt and their attestations
-#   5. homebrew, scoop, npm   publish the release (the signed Windows build when there is one).
+#   5. homebrew, scoop, npm, winget   publish the release (the signed Windows build when there
+#                       is one; winget only with it).
 #                       Each one installs the real package before publishing it. Prereleases
 #                       (vX.Y.Z-rc.1) stop before this step.
 # Re-run a failed package-manager job from the Actions page: the release files stay as they are.
@@ -338,6 +339,64 @@ jobs:
             sleep $((attempt * 3))
           done
           echo '::error::Could not push to the bucket'; exit 1
+
+  winget:
+    name: winget
+    # Signed builds only: winget installs the signed zip.
+    needs: [goreleaser, publish-signed]
+    if: ${{ !cancelled() && needs.goreleaser.outputs.prerelease == 'false' && needs.publish-signed.result == 'success' }}
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.goreleaser.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Write the manifests
+        id: manifests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release download $env:TAG -R $env:GITHUB_REPOSITORY -p 'checksums*.txt' -D dist
+          $released = (gh release view $env:TAG -R $env:GITHUB_REPOSITORY --json publishedAt | ConvertFrom-Json).publishedAt
+          $dir = node scripts/package-managers.mjs --version $env:VERSION --dist dist --out out --only winget --date ([datetime]$released).ToString('yyyy-MM-dd')
+          if ($LASTEXITCODE) { throw 'package-managers.mjs failed' }
+          Get-ChildItem $dir | ForEach-Object { Write-Host "── $($_.Name)"; Get-Content $_.FullName }
+          "dir=$dir" >> $env:GITHUB_OUTPUT
+      - name: Validate, install, check and uninstall with winget
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -Force | Out-Null
+            Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery -Scope CurrentUser
+            Repair-WinGetPackageManager -Latest -Force
+          }
+          winget --version
+          winget settings --enable LocalManifestFiles
+          $dir = '${{ steps.manifests.outputs.dir }}'
+          winget validate --manifest $dir
+          if ($LASTEXITCODE) { throw "winget validate failed ($LASTEXITCODE)" }
+          winget install --manifest $dir --accept-package-agreements --accept-source-agreements --disable-interactivity --silent
+          if ($LASTEXITCODE) { throw "winget install failed ($LASTEXITCODE)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\mcpsh.exe'
+          $said = & $exe version
+          Write-Host $said
+          if (-not ($said -match [regex]::Escape($env:VERSION))) { throw "unexpected version: $said" }
+          winget uninstall --id DavideMaggi.mcpsh --disable-interactivity --silent
+      - name: Submit to winget-pkgs
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:WINGET_TOKEN) { Write-Host "::notice::WINGET_TOKEN isn't set: winget skipped"; exit 0 }
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          # The PR comes from the token owner's fork of microsoft/winget-pkgs
+          .\wingetcreate.exe submit --token $env:WINGET_TOKEN '${{ steps.manifests.outputs.dir }}'
+          if ($LASTEXITCODE) { throw "wingetcreate submit failed ($LASTEXITCODE)" }
 
   npm:
     name: npm

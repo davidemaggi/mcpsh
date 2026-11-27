@@ -73,6 +73,7 @@ coding agent already has.**
 | Platform | Command |
 | --- | --- |
 | macOS (Homebrew) | `brew install --cask davidemaggi/tap/mcpsh` |
+| Windows (winget) | `winget install DavideMaggi.mcpsh` |
 | Windows (Scoop) | `scoop bucket add davidemaggi https://github.com/davidemaggi/scoop-bucket` then `scoop install mcpsh` |
 | Linux, macOS | `curl -fsSL https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.sh \| sh` |
 | Windows (PowerShell) | `irm https://raw.githubusercontent.com/davidemaggi/mcpsh/main/install.ps1 \| iex` |
@@ -296,8 +297,7 @@ mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextproto
 | ✅ | Skills for Claude Code, Codex and Copilot: `mcpsh skill install`, `npx skills add davidemaggi/mcpsh`, a setup Skill that configures any MCP server for you, `mcpsh skill generate`, `mcpsh agents-md` |
 | ✅ | Releases: prebuilt binaries with checksums and attestations, Homebrew, Scoop, npm (`@davidemaggi/mcpsh`), install scripts, signed Windows builds |
 | ✅ | Resources and prompts (`mcpsh resources`, `mcpsh prompts`), OAuth for remote servers (`mcpsh auth login`) |
-| ✅ | `mcpsh self-update` |
-| 🔭 | winget |
+| ✅ | `mcpsh self-update`, winget (`DavideMaggi.mcpsh`) |
 
 ## 🤝 Contributing
 

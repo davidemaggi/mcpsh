@@ -80,8 +80,9 @@ Each phase lands as one PR; CI (Linux, macOS, Windows) must be green before the 
    `@davidemaggi/mcpsh` (launcher + per-platform `optionalDependencies`, no postinstall, trusted
    publishing with provenance if available, published only after the Windows binaries are signed),
    README final pass (real install commands, demo recording).
-6. **Later.** OAuth (SDK `auth.AuthorizationCodeHandler`, client-side support is experimental),
-   resources and prompts, `self-update`, winget.
+6. **Extensions** (done, four PRs): 6a resources and prompts (`mcpsh resources`, `mcpsh prompts`),
+   6b OAuth (`mcpsh auth login|logout|status`, SDK `auth.AuthorizationCodeHandler`, tokens in the
+   state directory), 6c `mcpsh self-update`, 6d winget (portable zip manifest, signed builds).
 
 ## Risks to check early
 
