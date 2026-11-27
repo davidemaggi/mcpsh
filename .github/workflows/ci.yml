@@ -68,3 +68,133 @@ jobs:
         run: |
           go install github.com/google/go-licenses/v2@v2.0.1
           go-licenses check ./cmd/mcpsh --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC
+
+  # The release pipeline without publishing: GoReleaser builds a snapshot, then every way of
+  # installing it (install.sh, install.ps1, npm, Homebrew) is tried on the OS it is for.
+  snapshot:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Dependency licenses
+        run: |
+          go install github.com/google/go-licenses/v2@v2.0.1
+          go-licenses save ./cmd/mcpsh --save_path=third_party --force
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: v2.20.1
+          args: release --snapshot --clean
+      - id: meta
+        run: echo "version=$(jq -r .version dist/metadata.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snapshot
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  installers:
+    needs: snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.snapshot.outputs.version }}
+      MCPSH_VERSION: ${{ needs.snapshot.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          name: snapshot
+          path: dist
+      - name: Serve the snapshot like a GitHub release
+        run: |
+          mkdir -p "rel/download/v$VERSION"
+          cp dist/* "rel/download/v$VERSION/"
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory rel >/dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -fsS "http://127.0.0.1:8765/download/v$VERSION/checksums.txt" >/dev/null && exit 0; sleep 1; done
+          exit 1
+
+      - name: install.sh
+        if: runner.os != 'Windows'
+        run: |
+          MCPSH_BASE_URL=http://127.0.0.1:8765 MCPSH_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/mcpsh" version | tee version.txt
+          grep -F "$VERSION" version.txt
+          # A tampered archive must be refused
+          sed -i.bak 's/^[0-9a-f]/x/' "rel/download/v$VERSION/checksums.txt"
+          if MCPSH_BASE_URL=http://127.0.0.1:8765 MCPSH_INSTALL_DIR="$RUNNER_TEMP/bin2" sh install.sh; then
+            echo "::error::install.sh accepted a bad checksum"; exit 1
+          fi
+          mv "rel/download/v$VERSION/checksums.txt.bak" "rel/download/v$VERSION/checksums.txt"
+
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:MCPSH_BASE_URL = 'http://127.0.0.1:8765'
+          $env:MCPSH_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin'
+          $env:MCPSH_NO_PATH = '1'
+          ./install.ps1
+          $said = & (Join-Path $env:MCPSH_INSTALL_DIR 'mcpsh.exe') version
+          Write-Host $said
+          if (-not ($said -match [regex]::Escape($env:VERSION))) { throw "unexpected version: $said" }
+          # Again over the installed copy (the upgrade path)
+          ./install.ps1
+
+      - name: npm packages
+        run: |
+          node scripts/package-managers.mjs --version "$VERSION" --dist dist --out out --only npm
+          case "$RUNNER_OS-$(uname -m)" in
+            Linux-x86_64) plat=linux-x64 ;;
+            macOS-arm64) plat=darwin-arm64 ;;
+            macOS-x86_64) plat=darwin-x64 ;;
+            Windows-*) plat=win32-x64 ;;
+          esac
+          mkdir -p tgz
+          for d in out/npm/*/; do (cd "$d" && npm pack --pack-destination ../../../tgz >/dev/null); done
+          ls tgz
+          mkdir -p "$RUNNER_TEMP/npm-try" && cd "$RUNNER_TEMP/npm-try"
+          npm init -y >/dev/null
+          # Only this platform's package exists locally; the others are not on the registry yet
+          npm install --omit=optional --no-audit --no-fund \
+            "$GITHUB_WORKSPACE"/tgz/davidemaggi-mcpsh-$plat-*.tgz "$GITHUB_WORKSPACE"/tgz/davidemaggi-mcpsh-$VERSION.tgz
+          npx --no-install mcpsh version | tee version.txt
+          grep -F "$VERSION" version.txt
+          set +e; npx --no-install mcpsh no-such-server >/dev/null 2>&1; code=$?; set -e
+          [ "$code" = 2 ] || { echo "::error::the npm launcher returned $code instead of 2"; exit 1; }
+
+      - name: Homebrew cask
+        if: runner.os == 'macOS'
+        run: |
+          node scripts/package-managers.mjs --version "$VERSION" --dist dist --out out --only homebrew
+          # Install from the local files instead of the (not yet existing) GitHub release
+          sed -i '' "s|https://github.com/davidemaggi/mcpsh/releases/download/v#{version}/|file://$PWD/dist/|" out/homebrew/Casks/mcpsh.rb
+          cat out/homebrew/Casks/mcpsh.rb
+          brew tap-new --no-git ci/local
+          tapdir="$(brew --repository)/Library/Taps/ci/homebrew-local"
+          mkdir -p "$tapdir/Casks" && cp out/homebrew/Casks/mcpsh.rb "$tapdir/Casks/"
+          brew style --cask ci/local/mcpsh
+          brew install --cask ci/local/mcpsh
+          mcpsh version | grep -F "$VERSION"
+          if xattr -p com.apple.quarantine "$(brew --caskroom)/mcpsh/$VERSION/mcpsh" >/dev/null 2>&1; then
+            echo "::error::mcpsh is still quarantined"; exit 1
+          fi
+          brew uninstall --cask ci/local/mcpsh
