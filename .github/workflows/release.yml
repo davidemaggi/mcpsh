@@ -1,0 +1,387 @@
+name: Release
+
+# Pushing a tag vX.Y.Z releases that version:
+#   1. goreleaser       builds the six archives, checksums.txt and the GitHub release (+ attestations)
+#   2. signing-check    is the signing runner online? If not, the signed Windows build is skipped
+#   3. sign             Authenticode-signs mcpsh.exe on the self-hosted runner, which never checks
+#                       out or builds code: it signs files built here and hands them back
+#   4. publish-signed   adds the -signed zips, checksums-signed.txt and their attestations
+#   5. homebrew, scoop, npm   publish the release (the signed Windows build when there is one).
+#                       Each one installs the real package before publishing it. Prereleases
+#                       (vX.Y.Z-rc.1) stop before this step.
+# Re-run a failed package-manager job from the Actions page: the release files stay as they are.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.ref_name }}
+  GORELEASER_VERSION: v2.20.1
+
+jobs:
+  goreleaser:
+    name: Build and release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Tests
+        run: go test -count=1 ./internal/...
+      - name: Dependency licenses
+        run: |
+          go install github.com/google/go-licenses/v2@v2.0.1
+          go-licenses check ./cmd/mcpsh --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC
+          go-licenses save ./cmd/mcpsh --save_path=third_party --force
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest@v4
+        with:
+          subject-checksums: ./dist/checksums.txt
+      - id: meta
+        run: |
+          version=$(jq -r .version dist/metadata.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-unsigned
+          path: dist/*_windows_*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  signing-check:
+    name: Signing runner online?
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    outputs:
+      online: ${{ steps.check.outputs.online }}
+    steps:
+      - id: check
+        env:
+          # Fine-grained token with Administration: read on this repository (listing runners needs it)
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
+          LABEL: ${{ vars.SIGNING_RUNNER_LABEL || 'codesign' }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::RUNNER_STATUS_TOKEN isn't set: no signed Windows build this time"
+            echo "online=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          count=$(gh api "repos/${{ github.repository }}/actions/runners" --paginate \
+            --jq ".runners[] | select(.status == \"online\") | select(any(.labels[]; .name == \"$LABEL\")) | .name" | wc -l)
+          if [ "$count" -gt 0 ]; then
+            echo "online=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No online runner labelled '$LABEL': skipping the signed Windows build"
+            echo "online=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  sign:
+    name: Sign mcpsh.exe (Windows)
+    needs: [goreleaser, signing-check]
+    if: needs.signing-check.outputs.online == 'true'
+    runs-on: [self-hosted, "${{ vars.SIGNING_RUNNER_LABEL || 'codesign' }}"]
+    timeout-minutes: 30
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      VERSION: ${{ needs.goreleaser.outputs.version }}
+    steps:
+      # A self-hosted runner keeps its workspace between runs: start from an empty one
+      - name: Empty the workspace
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: Get-ChildItem -Force | Remove-Item -Recurse -Force
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-unsigned
+          path: in
+      - name: Sign and check
+        # Windows PowerShell: always there, unlike PowerShell 7. Its default policy (Restricted on
+        # Windows client) refuses the step's script file, so allow it for this process only.
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        env:
+          CODESIGN_CERT_SUBJECT: ${{ vars.CODESIGN_CERT_SUBJECT }}
+          CODESIGN_TIMESTAMP_URL: ${{ vars.CODESIGN_TIMESTAMP_URL }}
+          SIGNTOOL_PATH: ${{ vars.SIGNTOOL_PATH }}
+          CODESIGN_CERT_SHA1: ${{ vars.CODESIGN_CERT_SHA1 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # signtool: the SIGNTOOL_PATH variable, else the PATH, else the usual SDK folders (newest first)
+          $signtool = $env:SIGNTOOL_PATH
+          if (-not $signtool) { $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source }
+          $searched = @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe",
+            "${env:ProgramFiles}\Windows Kits\10\bin\*\x64\signtool.exe",
+            "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\signtool.exe",
+            "${env:ProgramFiles(x86)}\Microsoft SDKs\ClickOnce\SignTool\signtool.exe"
+          )
+          if (-not $signtool) {
+            $signtool = $searched | ForEach-Object { Get-ChildItem $_ -ErrorAction SilentlyContinue } |
+              Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $signtool -or -not (Test-Path $signtool)) {
+            throw "signtool.exe not found. Looked at SIGNTOOL_PATH ('$env:SIGNTOOL_PATH'), the PATH and: $($searched -join '; '). Set the SIGNTOOL_PATH repository variable to its full path, or install the Windows SDK signing tools."
+          }
+          Write-Host "Using $signtool"
+
+          # The certificate: by thumbprint when CODESIGN_CERT_SHA1 is set, else by subject text
+          if ($env:CODESIGN_CERT_SHA1) { $certificate = @('/sha1', ($env:CODESIGN_CERT_SHA1 -replace '\s', '')) }
+          elseif ($env:CODESIGN_CERT_SUBJECT) { $certificate = @('/n', $env:CODESIGN_CERT_SUBJECT, '/a') }
+          else { throw 'Set CODESIGN_CERT_SHA1 or CODESIGN_CERT_SUBJECT' }
+          if (-not $env:CODESIGN_TIMESTAMP_URL) { throw 'CODESIGN_TIMESTAMP_URL is not set' }
+          function Show-Certificates {
+            Write-Host "Running as $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+            foreach ($store in 'Cert:\CurrentUser\My', 'Cert:\LocalMachine\My') {
+              $found = @(Get-ChildItem $store -CodeSigningCert -ErrorAction SilentlyContinue)
+              Write-Host "$store : $($found.Count) code-signing certificate(s)"
+              $found | ForEach-Object { Write-Host "  $($_.Subject) | $($_.Thumbprint) | until $($_.NotAfter)" }
+            }
+          }
+
+          # Exactly this release's two Windows archives, nothing else
+          $expected = @('amd64', 'arm64') | ForEach-Object { "mcpsh_$($env:VERSION)_windows_$_.zip" }
+          $files = @(Get-ChildItem in -File | Select-Object -ExpandProperty Name | Sort-Object)
+          if (($files -join '|') -ne ($expected -join '|')) { throw "Expected $($expected -join ', '), got $($files -join ', ')" }
+
+          New-Item -ItemType Directory out | Out-Null
+          foreach ($name in $expected) {
+            $dir = Join-Path 'work' ([IO.Path]::GetFileNameWithoutExtension($name))
+            Expand-Archive (Join-Path in $name) -DestinationPath $dir
+            $exe = Join-Path $dir 'mcpsh.exe'
+            & $signtool sign @certificate /fd sha256 /tr "$env:CODESIGN_TIMESTAMP_URL" /td sha256 $exe
+            if ($LASTEXITCODE) { Show-Certificates; throw "signtool sign failed ($LASTEXITCODE)" }
+            & $signtool verify /pa /all $exe
+            if ($LASTEXITCODE) { throw "signtool verify failed ($LASTEXITCODE)" }
+            # Same content and layout as the unsigned zip, with the signed exe
+            $signed = Join-Path out ($name -replace '\.zip$', '-signed.zip')
+            Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $signed
+          }
+          Get-ChildItem out
+      - uses: actions/upload-artifact@v7
+        id: upload
+        with:
+          name: windows-signed
+          path: out/*-signed.zip
+          if-no-files-found: error
+          retention-days: 1
+      - name: Empty the workspace again
+        if: always()
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: Get-ChildItem -Force | Remove-Item -Recurse -Force
+
+  publish-signed:
+    name: Add the signed Windows build
+    needs: [goreleaser, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.sign.outputs.artifact }}
+          merge-multiple: true
+          path: signed
+      - name: Checksums
+        working-directory: signed
+        run: |
+          sha256sum *-signed.zip > checksums-signed.txt
+          cat checksums-signed.txt
+      - uses: actions/attest@v4
+        with:
+          subject-checksums: signed/checksums-signed.txt
+      - name: Upload
+        run: |
+          gh release upload "$TAG" signed/*-signed.zip signed/checksums-signed.txt --clobber
+          gh release view "$TAG" --json body --jq .body > notes.md
+          grep -q '### Signed Windows build' notes.md && exit 0
+          cat >> notes.md <<'NOTE'
+
+          ### Signed Windows build
+
+          The `-signed` zips contain an Authenticode-signed `mcpsh.exe` (checksums in `checksums-signed.txt`). `install.ps1`, Scoop and npm use them; the unsigned zips stay for anyone who verifies builds through the attestations.
+          NOTE
+          gh release edit "$TAG" --notes-file notes.md
+
+  # ── Package managers ──────────────────────────────────────────────────────────────────────────
+  # After the signed build when there is one; also when signing was skipped (runner offline).
+  homebrew:
+    name: Homebrew
+    needs: [goreleaser, publish-signed]
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' && needs.goreleaser.outputs.prerelease == 'false' && needs.publish-signed.result != 'failure' }}
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.goreleaser.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Write the cask
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'checksums*.txt' -D dist
+          node scripts/package-managers.mjs --version "$VERSION" --dist dist --out out --only homebrew
+          cat out/homebrew/Casks/mcpsh.rb
+      - name: Audit, install, check and uninstall with brew
+        env:
+          # brew audit --online asks GitHub's API; anonymously, shared runners hit the rate limit
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+        run: |
+          brew tap-new --no-git ci/local
+          tapdir="$(brew --repository)/Library/Taps/ci/homebrew-local"
+          mkdir -p "$tapdir/Casks" && cp out/homebrew/Casks/mcpsh.rb "$tapdir/Casks/"
+          brew style --cask ci/local/mcpsh
+          brew audit --cask --online ci/local/mcpsh
+          brew install --cask ci/local/mcpsh
+          mcpsh version | grep -F "$VERSION"
+          brew uninstall --cask ci/local/mcpsh
+      - name: Publish to the tap
+        env:
+          TOKEN: ${{ secrets.PACKAGE_REPOS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::notice::PACKAGE_REPOS_TOKEN isn't set: Homebrew skipped"; exit 0; fi
+          git clone "https://x-access-token:$TOKEN@github.com/davidemaggi/homebrew-tap.git" tap
+          mkdir -p tap/Casks && cp out/homebrew/Casks/mcpsh.rb tap/Casks/
+          cd tap
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Casks/mcpsh.rb
+          if git diff --cached --quiet; then echo "mcpsh $VERSION is already in the tap"; exit 0; fi
+          git commit -m "mcpsh $VERSION"
+          # Other projects publish to the same tap: on a race, rebase on theirs and try again
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD; then exit 0; fi
+            git pull --rebase origin "$(git rev-parse --abbrev-ref HEAD)"
+            sleep $((attempt * 3))
+          done
+          echo '::error::Could not push to the tap'; exit 1
+
+  scoop:
+    name: Scoop
+    needs: [goreleaser, publish-signed]
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' && needs.goreleaser.outputs.prerelease == 'false' && needs.publish-signed.result != 'failure' }}
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.goreleaser.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Write the manifest
+        run: |
+          gh release download $env:TAG -R $env:GITHUB_REPOSITORY -p 'checksums*.txt' -D dist
+          node scripts/package-managers.mjs --version $env:VERSION --dist dist --out out --only scoop
+          if ($LASTEXITCODE) { throw 'package-managers.mjs failed' }
+          Get-Content out/scoop/bucket/mcpsh.json
+      - name: Install, check and uninstall with scoop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-RestMethod https://get.scoop.sh -OutFile install-scoop.ps1
+          ./install-scoop.ps1 -RunAsAdmin
+          $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+          scoop install (Resolve-Path out/scoop/bucket/mcpsh.json).Path
+          if ($LASTEXITCODE) { throw "scoop install failed ($LASTEXITCODE)" }
+          $said = mcpsh version
+          Write-Host $said
+          if (-not ($said -match [regex]::Escape($env:VERSION))) { throw "unexpected version: $said" }
+          scoop uninstall mcpsh
+      - name: Publish to the bucket
+        env:
+          TOKEN: ${{ secrets.PACKAGE_REPOS_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::notice::PACKAGE_REPOS_TOKEN isn't set: Scoop skipped"; exit 0; fi
+          git clone "https://x-access-token:$TOKEN@github.com/davidemaggi/scoop-bucket.git" bucket
+          mkdir -p bucket/bucket && cp out/scoop/bucket/mcpsh.json bucket/bucket/
+          cd bucket
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bucket/mcpsh.json
+          if git diff --cached --quiet; then echo "mcpsh $VERSION is already in the bucket"; exit 0; fi
+          git commit -m "mcpsh $VERSION"
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD; then exit 0; fi
+            git pull --rebase origin "$(git rev-parse --abbrev-ref HEAD)"
+            sleep $((attempt * 3))
+          done
+          echo '::error::Could not push to the bucket'; exit 1
+
+  npm:
+    name: npm
+    needs: [goreleaser, publish-signed]
+    if: ${{ !cancelled() && needs.goreleaser.result == 'success' && needs.goreleaser.outputs.prerelease == 'false' && needs.publish-signed.result != 'failure' }}
+    runs-on: ubuntu-latest
+    # Trusted publishing (OIDC) and provenance need the id token
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.goreleaser.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Build the packages
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'checksums*.txt' -p '*.tar.gz' -p '*.zip' -D dist
+          node scripts/package-managers.mjs --version "$VERSION" --dist dist --out out --only npm
+      - name: Check the package on this platform
+        run: |
+          mkdir -p tgz
+          for d in out/npm/*/; do (cd "$d" && npm pack --pack-destination ../../../tgz >/dev/null); done
+          mkdir try && cd try && npm init -y >/dev/null
+          npm install --omit=optional --no-audit --no-fund \
+            ../tgz/davidemaggi-mcpsh-linux-x64-*.tgz "../tgz/davidemaggi-mcpsh-$VERSION.tgz"
+          npx --no-install mcpsh version | grep -F "$VERSION"
+      - name: Publish
+        env:
+          # A token for the first publish; afterwards trusted publishing (no token) is enough
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TRUSTED: ${{ vars.NPM_TRUSTED_PUBLISHING }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ] && [ "$TRUSTED" != true ]; then
+            echo "::notice::Neither NPM_TOKEN nor NPM_TRUSTED_PUBLISHING=true is set: npm skipped"; exit 0
+          fi
+          npm install -g npm@11
+          npm --version
+          while read -r pkg; do
+            name=$(jq -r .name "out/npm/$pkg/package.json")
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then echo "$name@$VERSION is already published"; continue; fi
+            (cd "out/npm/$pkg" && npm publish --access public --provenance)
+          done < out/npm/publish-order.txt
