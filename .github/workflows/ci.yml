@@ -111,6 +111,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.snapshot.outputs.version }}
+      MCPSH_VERSION: ${{ needs.snapshot.outputs.version }}
     defaults:
       run:
         shell: bash
