@@ -184,6 +184,40 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+func TestResolveOAuth(t *testing.T) {
+	userDir, project := setup(t)
+	write(t, filepath.Join(userDir, UserFileName), `{"mcpServers": {
+	  "plain":  {"url": "https://a/mcp"},
+	  "static": {"url": "https://b/mcp", "headers": {"authorization": "Bearer x"}},
+	  "off":    {"url": "https://c/mcp", "oauth": {"disabled": true}},
+	  "pre":    {"url": "https://d/mcp", "oauth": {"clientId": "id", "clientSecret": "${SECRET}", "scopes": ["read"], "redirectPort": 8765}},
+	  "sse":    {"url": "https://e/sse", "type": "sse"},
+	  "leak":   {"url": "https://f/mcp", "oauth": {"clientId": "id", "clientSecret": "s3cr3t"}}
+	}}`)
+	cfg, err := Load(project)
+	must(t, err)
+	lookup := lookupFrom(map[string]string{"SECRET": "shh"})
+	for name, want := range map[string]bool{"plain": true, "static": false, "off": false, "pre": true, "sse": false} {
+		rs, err := cfg.Resolve(name, lookup)
+		must(t, err)
+		if (rs.OAuth != nil) != want {
+			t.Errorf("%s: OAuth = %+v, want enabled=%v", name, rs.OAuth, want)
+		}
+	}
+	pre, _ := cfg.Resolve("pre", lookup)
+	if o := pre.OAuth; o.ClientID != "id" || o.ClientSecret != "shh" || o.RedirectPort != 8765 || len(o.Scopes) != 1 {
+		t.Errorf("pre = %+v", o)
+	}
+	id := pre.ID
+	pre.SetAuthStamp("c@1")
+	if pre.ID == id {
+		t.Error("the auth stamp must change the ID")
+	}
+	if got := LiteralSecrets(&cfg.Servers["leak"].Server); len(got) != 1 || got[0] != "oauth.clientSecret" {
+		t.Errorf("literal client secret not flagged: %v", got)
+	}
+}
+
 func TestFindProjectFileStopsAtGitRoot(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, ProjectFileName), `{}`)

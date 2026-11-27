@@ -13,7 +13,7 @@ import (
 
 // ReservedNames are built-in commands; servers cannot use them as names.
 var ReservedNames = []string{
-	"add", "agents-md", "call", "completion", "config", "daemon", "help", "import", "list",
+	"add", "agents-md", "auth", "call", "completion", "config", "daemon", "help", "import", "list",
 	"prompts", "refresh", "remove", "resources", "self-update", "skill", "trust", "version",
 }
 

@@ -63,7 +63,7 @@ With --check every server is contacted and its tool list refreshed.`,
 					Name: name, Scope: string(e.Scope), File: e.File,
 					Transport: e.Server.TransportType(), Target: rawTarget(&e.Server), Status: "ready",
 				}
-				rs, rerr := cfg.Resolve(name, a.Lookup)
+				rs, rerr := withAuthStamp(cfg.Resolve(name, a.Lookup))
 				switch {
 				case e.Server.Disabled:
 					info.Status = "disabled"

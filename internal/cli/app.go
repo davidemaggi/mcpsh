@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/davidemaggi/mcpsh/internal/auth"
 	"github.com/davidemaggi/mcpsh/internal/config"
 	"github.com/davidemaggi/mcpsh/internal/daemon"
 	"github.com/davidemaggi/mcpsh/internal/engine"
@@ -151,7 +152,16 @@ func (a *App) resolve(name string) (*config.Resolved, error) {
 	if err := ts.Check(e); err != nil {
 		return nil, err
 	}
-	return cfg.Resolve(name, a.Lookup)
+	return withAuthStamp(cfg.Resolve(name, a.Lookup))
+}
+
+// withAuthStamp ties an OAuth server's session to its stored login, so that a session opened
+// before "mcpsh auth login" or "logout" is replaced instead of reused.
+func withAuthStamp(rs *config.Resolved, err error) (*config.Resolved, error) {
+	if err == nil && rs.OAuth != nil {
+		rs.SetAuthStamp(auth.Stamp(rs.URL))
+	}
+	return rs, err
 }
 
 func (a *App) jsonOutput() bool { return a.output == "json" }

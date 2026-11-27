@@ -31,7 +31,7 @@ type Options struct {
 	Stderr io.Writer
 	// OnToolsChanged is called when the server sends notifications/tools/list_changed.
 	OnToolsChanged func()
-	// Auth provides OAuth for remote servers; nil means static headers only.
+	// Auth provides OAuth for remote servers; nil means the stored login (auth.Stored).
 	Auth auth.Provider
 }
 
@@ -86,7 +86,11 @@ func Connect(ctx context.Context, rs *config.Resolved, opts Options) (*Conn, err
 		c.proc = p
 		transport = &mcp.IOTransport{Reader: p.Stdout, Writer: p.Stdin}
 	default:
-		t, err := httpTransport(ctx, rs, opts.Auth)
+		provider := opts.Auth
+		if provider == nil {
+			provider = auth.Stored{}
+		}
+		t, err := httpTransport(ctx, rs, provider)
 		if err != nil {
 			return nil, &ConnectError{Server: rs.Name, Err: err}
 		}
@@ -132,6 +136,13 @@ func Connect(ctx context.Context, rs *config.Resolved, opts Options) (*Conn, err
 			}
 		}()
 		err := res.err
+		var lre *auth.LoginRequiredError
+		if errors.As(err, &lre) {
+			if c.proc != nil {
+				_ = c.proc.Close(closeGrace)
+			}
+			return nil, lre
+		}
 		ce := &ConnectError{Server: rs.Name, Err: err}
 		if c.proc != nil {
 			_ = c.proc.Close(closeGrace)
@@ -299,6 +310,10 @@ func (c *Conn) Close() error {
 }
 
 func (c *Conn) classify(ctx context.Context, err error) error {
+	var lre *auth.LoginRequiredError
+	if errors.As(err, &lre) {
+		return lre
+	}
 	var we *jsonrpc.Error
 	if errors.As(err, &we) {
 		return &ServerError{Server: c.Server.Name, Code: we.Code, Message: we.Message}
