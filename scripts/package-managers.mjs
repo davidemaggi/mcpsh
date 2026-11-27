@@ -2,7 +2,7 @@
 // Writes the package-manager files for a release from the files GoReleaser (and the signing
 // jobs) produced. Nothing is rebuilt: every package points at, or contains, a release file.
 //
-//   node scripts/package-managers.mjs --version 1.2.3 --dist dist --out out [--only homebrew,scoop,npm]
+//   node scripts/package-managers.mjs --version 1.2.3 --dist dist --out out [--only homebrew,scoop,npm,winget]
 //
 // --dist holds the release files: mcpsh_<v>_<os>_<arch>.tar.gz|zip, checksums.txt and, when
 // Windows signing ran, mcpsh_<v>_windows_<arch>-signed.zip and checksums-signed.txt.
@@ -12,6 +12,7 @@
 //   out/homebrew/Casks/mcpsh.rb
 //   out/scoop/bucket/mcpsh.json
 //   out/npm/<package>/...      one directory per npm package, ready for `npm publish`
+//   out/winget/manifests/d/DavideMaggi/mcpsh/<version>/   the winget manifests (path printed on stdout)
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,8 @@ const { values } = parseArgs({
     dist: { type: 'string', default: 'dist' },
     out: { type: 'string', default: 'out' },
     only: { type: 'string', default: 'homebrew,scoop,npm' },
+    date: { type: 'string', default: new Date().toISOString().slice(0, 10) },
+    'winget-unsigned': { type: 'boolean', default: false },
   },
 });
 if (!values.version) fail('--version is required');
@@ -251,6 +254,102 @@ function npm() {
   write(join(root, 'publish-order.txt'), order.join('\n') + '\n');
 }
 
+// ── winget ───────────────────────────────────────────────────────────────────────────────────
+// A portable package: winget unpacks the signed zip and puts an "mcpsh" alias on the PATH.
+// Signed builds only (winget shows the publisher; SmartScreen trusts it), unless
+// --winget-unsigned, which CI uses to check that the manifests can be written.
+// 1.10: the newest manifest schema that the winget clients in use (and the CI runner's) all read.
+const WINGET_ID = 'DavideMaggi.mcpsh';
+const WINGET_SCHEMA = '1.10.0';
+
+function yaml(value, indent = '') {
+  const scalar = (v) => (typeof v === 'string' ? JSON.stringify(v) : String(v));
+  let out = '';
+  for (const [k, v] of Object.entries(value)) {
+    if (Array.isArray(v)) {
+      out += `${indent}${k}:\n`;
+      for (const item of v) {
+        if (item && typeof item === 'object') {
+          const inner = yaml(item, indent + '    ');
+          out += `${indent}  - ${inner.trimStart()}`;
+        } else {
+          out += `${indent}  - ${scalar(item)}\n`;
+        }
+      }
+    } else if (v && typeof v === 'object') {
+      out += `${indent}${k}:\n` + yaml(v, indent + '  ');
+    } else if (v !== undefined) {
+      out += `${indent}${k}: ${scalar(v)}\n`;
+    }
+  }
+  return out;
+}
+
+function winget() {
+  const file = (arch) => {
+    const signed = signedArchive(arch);
+    if (signedSums.has(signed)) return signed;
+    if (values['winget-unsigned']) return archive('windows', arch);
+    fail(`winget needs the signed Windows build (${signed}); it is not in checksums-signed.txt`);
+  };
+  const files = { amd64: file('amd64'), arm64: file('arm64') }; // fail before writing anything
+  const dir = join(out, 'winget', 'manifests', 'd', 'DavideMaggi', 'mcpsh', version);
+  const header = (type) => `# yaml-language-server: $schema=https://aka.ms/winget-manifest.${type}.${WINGET_SCHEMA}.schema.json\n\n`;
+  const put = (name, type, body) => write(join(dir, name), header(type) + yaml(body));
+  put(`${WINGET_ID}.yaml`, 'version', {
+    PackageIdentifier: WINGET_ID,
+    PackageVersion: version,
+    DefaultLocale: 'en-US',
+    ManifestType: 'version',
+    ManifestVersion: WINGET_SCHEMA,
+  });
+  put(`${WINGET_ID}.installer.yaml`, 'installer', {
+    PackageIdentifier: WINGET_ID,
+    PackageVersion: version,
+    Platform: ['Windows.Desktop'],
+    MinimumOSVersion: '10.0.17763.0',
+    InstallerType: 'zip',
+    NestedInstallerType: 'portable',
+    NestedInstallerFiles: [{ RelativeFilePath: 'mcpsh.exe', PortableCommandAlias: 'mcpsh' }],
+    Commands: ['mcpsh'],
+    ReleaseDate: values.date,
+    Installers: ['amd64', 'arm64'].map((arch) => ({
+      Architecture: arch === 'amd64' ? 'x64' : 'arm64',
+      InstallerUrl: downloadUrl(files[arch]),
+      InstallerSha256: sha(files[arch]).toUpperCase(),
+    })),
+    ManifestType: 'installer',
+    ManifestVersion: WINGET_SCHEMA,
+  });
+  put(`${WINGET_ID}.locale.en-US.yaml`, 'defaultLocale', {
+    PackageIdentifier: WINGET_ID,
+    PackageVersion: version,
+    PackageLocale: 'en-US',
+    Publisher: 'Davide Maggi',
+    PublisherUrl: 'https://github.com/davidemaggi',
+    PublisherSupportUrl: `${HOMEPAGE}/issues`,
+    Author: 'Davide Maggi',
+    PackageName: 'mcpsh',
+    PackageUrl: HOMEPAGE,
+    License: 'MIT',
+    LicenseUrl: `${HOMEPAGE}/blob/main/LICENSE`,
+    Copyright: 'Copyright (c) Davide Maggi',
+    ShortDescription: DESCRIPTION,
+    Description:
+      'mcpsh turns the tools of any Model Context Protocol (MCP) server into plain CLI commands, so coding agents ' +
+      '(Claude Code, Codex, GitHub Copilot) and people can use them with nothing but a shell. A single executable ' +
+      'with a background daemon that keeps servers warm.',
+    Moniker: 'mcpsh',
+    Tags: ['mcp', 'model-context-protocol', 'cli', 'ai', 'agents', 'claude-code', 'codex', 'copilot'],
+    ReleaseNotesUrl: `${HOMEPAGE}/releases/tag/v${version}`,
+    Documentations: [{ DocumentLabel: 'README', DocumentUrl: `${HOMEPAGE}#readme` }],
+    ManifestType: 'defaultLocale',
+    ManifestVersion: WINGET_SCHEMA,
+  });
+  console.log(dir);
+}
+
 if (only.has('homebrew')) homebrew();
 if (only.has('scoop')) scoop();
 if (only.has('npm')) npm();
+if (only.has('winget')) winget();

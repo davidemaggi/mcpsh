@@ -159,6 +159,20 @@ jobs:
           # Again over the installed copy (the upgrade path)
           ./install.ps1
 
+      - name: winget manifests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # The snapshot is unsigned: only check that valid manifests are written.
+          $dir = node scripts/package-managers.mjs --version $env:VERSION --dist dist --out out --only winget --winget-unsigned
+          if ($LASTEXITCODE) { throw 'package-managers.mjs failed' }
+          if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget validate --manifest $dir
+            if ($LASTEXITCODE) { throw "winget validate failed ($LASTEXITCODE)" }
+          } else {
+            Write-Host "::notice::winget is not installed on this runner: manifests written, not validated"
+          }
+
       - name: npm packages
         run: |
           node scripts/package-managers.mjs --version "$VERSION" --dist dist --out out --only npm
