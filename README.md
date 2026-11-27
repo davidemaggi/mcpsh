@@ -1,0 +1,234 @@
+<div align="center">
+
+# mcpsh
+
+### Every MCP server, one shell command away.
+
+**mcpsh** turns the tools of any [Model Context Protocol](https://modelcontextprotocol.io) server into
+plain CLI commands, so Claude Code, Codex, GitHub Copilot (and you) can use them with nothing but a shell.
+
+[![CI](https://github.com/davidemaggi/mcpsh/actions/workflows/ci.yml/badge.svg)](https://github.com/davidemaggi/mcpsh/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/davidemaggi/mcpsh?logo=go)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-informational)
+
+[Quickstart](#-quickstart-5-minutes) ·
+[Why](#-why-mcpsh) ·
+[Commands](#-commands) ·
+[Configuration](#%EF%B8%8F-configuration) ·
+[Security](#-security-by-default) ·
+[Roadmap](#%EF%B8%8F-roadmap)
+
+</div>
+
+```console
+$ mcpsh add github --env GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_TOKEN}' -- npx -y @modelcontextprotocol/server-github
+$ mcpsh github
+Tools of "github" (41):
+  create_issue     Create a new issue in a GitHub repository
+  list_issues      List issues in a GitHub repository with filtering options
+  ...
+$ mcpsh github create_issue --owner acme --repo api --title "Login is broken" --labels bug --labels p1
+Created issue #482: https://github.com/acme/api/issues/482
+```
+
+---
+
+## ✨ Why mcpsh?
+
+MCP is great. Wiring every server into every agent is not: each tool has its own config format,
+servers load their whole tool catalogue into the context window, and slow `npx` servers start
+again and again.
+
+mcpsh takes a different route: **one binary, configured once, used through the shell that every
+coding agent already has.**
+
+- 🪶 **Zero runtime.** A single, statically compiled executable for Linux, macOS and Windows.
+  No Node, no Python, no Docker for mcpsh itself.
+- 🧠 **Context-friendly by design.** Agents discover tools progressively
+  (`mcpsh list` → `mcpsh <server>` → `mcpsh <server> <tool> --help`) instead of loading every
+  schema up front.
+- 🧩 **Real CLI flags from JSON Schema.** Strings, numbers, booleans, enums, repeatable arrays,
+  defaults and required parameters become `--flags`, validated *before* the call. Complex input?
+  `--json '{...}'`, `--json @args.json` or `--json -`.
+- 📋 **Bring your config.** Uses the same `mcpServers` format as Claude Desktop and `.mcp.json`;
+  `mcpsh import` copies an existing file.
+- 🔒 **Secure by default.** Secrets stay in environment variables, project servers need your
+  approval, destructive tools need `--yes`.
+- 🤖 **Made for agents, pleasant for humans.** Clean stdout, errors on stderr, `--output json`
+  for machines, and [documented exit codes](#-exit-codes).
+- 🧹 **No orphans.** Every server runs in its own process tree (a job object on Windows, a process
+  group on Unix) and is cleaned up completely, even behind `npx.cmd` shims.
+
+## 🚀 Quickstart (5 minutes)
+
+> mcpsh needs no runtime. The MCP **servers** you add may: servers started with `npx` need
+> Node.js, servers started with `uvx` need Python with [uv](https://docs.astral.sh/uv/).
+
+**1. Install**
+
+```sh
+go install github.com/davidemaggi/mcpsh/cmd/mcpsh@latest
+```
+
+Prebuilt binaries, Homebrew, Scoop and one-line installers are coming with the first release
+([roadmap](#%EF%B8%8F-roadmap)).
+
+**2. Add a server**
+
+```sh
+# a local (stdio) server
+mcpsh add fs -- npx -y @modelcontextprotocol/server-filesystem .
+
+# or reuse what you already have
+mcpsh import .mcp.json
+```
+
+**3. Explore and call it**
+
+```sh
+mcpsh list                                   # servers and their status
+mcpsh fs                                     # tools, one line each
+mcpsh fs read_text_file --help               # parameters, generated from the schema
+mcpsh fs read_text_file --path README.md     # call it
+mcpsh fs list_directory --path . -o json     # full MCP result as JSON
+```
+
+**4. Teach your agent** — add this to `AGENTS.md`, `CLAUDE.md` or
+`.github/copilot-instructions.md` (a `mcpsh skill install` command that does it for you is on the
+[roadmap](#%EF%B8%8F-roadmap)):
+
+```markdown
+## MCP tools
+MCP servers are available through the `mcpsh` CLI. Discover before calling:
+`mcpsh list`, then `mcpsh <server>`, then `mcpsh <server> <tool> --help`.
+Call with `mcpsh <server> <tool> --param value`; use `--output json` to process results.
+Destructive tools need `--yes`: ask the user before passing it.
+```
+
+## 🧰 Commands
+
+| Command | What it does |
+| --- | --- |
+| `mcpsh list [--check]` | Configured servers, transport, cached tool count, status. `--check` contacts each server. |
+| `mcpsh <server>` | The server's tools, one line each (`-o json` for a machine-readable list). |
+| `mcpsh <server> <tool> --help` | Full description, annotations and the flags generated from the input schema. |
+| `mcpsh <server> <tool> --schema` | The raw input and output JSON Schema. |
+| `mcpsh <server> <tool> [--param v ...]` | Call the tool. `mcpsh call <server> <tool>` is the explicit form. |
+| `mcpsh add <name> -- <cmd> [args]` | Add a stdio server (`--env K=V`, `--cwd`, `--scope user\|project`). |
+| `mcpsh add <name> --url <url>` | Add a remote server (`--header "Name: value"`). Connecting to remote servers lands in the next release. |
+| `mcpsh remove <name>` | Remove a server. |
+| `mcpsh import [file]` | Copy servers from a `.mcp.json`-style file. |
+| `mcpsh trust [server] [--all]` | Review and approve servers defined by the project file. |
+| `mcpsh refresh [server]` | Fetch tool lists again and update the cache. |
+| `mcpsh version` | Version and build information. |
+
+Global flags: `-o, --output text|json`, `--timeout 30s`, `-y, --yes`.
+Tool names also work in kebab-case (`create-issue`), and so do parameter flags (`--page-size`).
+A parameter whose name clashes with a global flag is exposed as `--param-<name>`.
+
+### Output
+
+- Text content goes to **stdout**; when the tool reports an error it goes to **stderr**.
+- Images, audio and binary resources are saved to a temporary file and the path is printed.
+- Results with only `structuredContent` are printed as indented JSON.
+- `--output json` prints the complete MCP result: `content`, `structuredContent`, `isError`.
+
+### 🚦 Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | The tool reported an error (`isError`) or the server rejected the call |
+| `2` | Usage, validation, configuration or trust error: fix the command or the config |
+| `3` | Connection, transport or timeout error: the server could not be reached or crashed |
+
+## ⚙️ Configuration
+
+Two files, merged; the project wins:
+
+| Level | Location |
+| --- | --- |
+| User | `~/.config/mcpsh/config.json` (Linux/macOS, honours `XDG_CONFIG_HOME`) · `%APPDATA%\mcpsh\config.json` (Windows) |
+| Project | `.mcpsh.json`, searched from the current directory up to the repository root |
+
+```jsonc
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" },
+      "allowTools": ["*issue*", "get_*"],      // optional: only expose these (globs)
+      "denyTools": ["delete_*"],               // optional: hide these
+      "timeout": "60s"
+    },
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "env": { "LOG_LEVEL": "${FS_LOG_LEVEL:-info}" },
+      "confirmTools": ["write_*"],             // ask for --yes even without a destructive hint
+      "startupTimeout": "2m",
+      "roots": true                            // advertise the project root (default)
+    },
+    "legacy": { "disabled": true }             // in a project file: hide a user server
+  },
+  "settings": { "callTimeout": "60s", "cacheTTL": "24h" }
+}
+```
+
+- Remote servers (`"type": "http"` or `"sse"`) can already be configured; connecting to them
+  lands in the next release (see the [roadmap](#%EF%B8%8F-roadmap)).
+- `${VAR}` and `${VAR:-default}` are expanded from the environment in `command`, `args`, `env`,
+  `cwd`, `url` and `headers`. A missing variable is a clear error, never an empty secret.
+- A project server with the same name replaces the user server entirely.
+- stdio servers start in the project root (the folder with `.mcpsh.json`, else the git root).
+- Tool lists are cached on disk (`cacheTTL`, default 24h), so `--help` is instant and never
+  starts a server. `mcpsh refresh` updates them.
+
+## 🔒 Security by default
+
+- **No secrets in project files.** `mcpsh add --scope project` refuses clear-text values for
+  secret-looking env vars and headers (`*TOKEN*`, `*KEY*`, `Authorization`, ...): use `${VAR}`.
+- **Project servers need approval.** A cloned repository cannot make mcpsh run commands behind
+  your back: `mcpsh trust` shows what a project file wants to run and records your approval for
+  that exact definition. Change the definition and it needs approval again.
+- **Destructive tools need consent.** Tools annotated `destructiveHint: true` (or matched by
+  `confirmTools`) ask for confirmation on a terminal and require `--yes` everywhere else, so an
+  agent cannot run them by accident.
+- **Timeouts everywhere.** Startup and call timeouts, configurable per server and per call.
+
+## 🏗️ How it works
+
+```mermaid
+flowchart LR
+    A[Coding agent / you] -- shell --> C[mcpsh CLI]
+    C -- tools/list cache --> K[(disk cache)]
+    C -- stdio --> S1[local MCP server<br/>npx / uvx / binary]
+    C -- Streamable HTTP --> S2[remote MCP server]
+```
+
+mcpsh is built on the official [MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk).
+A per-user background daemon that keeps sessions warm, so slow `npx` servers start once instead
+of on every call, is next on the roadmap. The CLI will start it transparently.
+
+## 🗺️ Roadmap
+
+| | Feature |
+| --- | --- |
+| ✅ | Config (user + project, env interpolation, trust), stdio servers, schema-to-flags, validation, output modes, exit codes, discovery cache, destructive-tool guard, Windows-safe process trees |
+| 🚧 | Background daemon: warm sessions, idle timeouts, auto-restart, concurrent calls (`--no-daemon` for CI) |
+| 🚧 | Streamable HTTP and legacy SSE servers, custom headers, `tools/list_changed` |
+| 🚧 | `mcpsh skill install` for Claude Code, Codex and Copilot, `mcpsh skill generate`, `mcpsh agents-md` |
+| 🚧 | Releases: prebuilt binaries, Homebrew, Scoop, install scripts, signed Windows builds |
+| 🔭 | OAuth for remote servers, resources and prompts, `self-update`, winget |
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. `go test ./...` runs unit tests and end-to-end tests
+against a real MCP test server (`cmd/mcpsh-testserver`) on every platform. The design and the
+delivery plan live in [docs/plan.md](docs/plan.md).
+
+## 📄 License
+
+[MIT](LICENSE) © Davide Maggi
