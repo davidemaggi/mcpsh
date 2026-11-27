@@ -198,7 +198,7 @@ jobs:
       - name: npm packages from Windows-made signed zips
         if: runner.os == 'Linux'
         run: |
-          # The signed zips are written by PowerShell on Windows: DOS entries without Unix modes.
+          # Zips written by Windows PowerShell: DOS entries, no Unix modes, backslash paths.
           python3 - "$VERSION" <<'PY'
           import sys, zipfile, hashlib, pathlib
           v = sys.argv[1]
@@ -208,7 +208,7 @@ jobs:
               dst = pathlib.Path(f"dist/mcpsh_{v}_windows_{arch}-signed.zip")
               with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
                   for item in zin.infolist():
-                      info = zipfile.ZipInfo(item.filename, item.date_time)
+                      info = zipfile.ZipInfo(item.filename.replace("/", "\\"), item.date_time)
                       info.create_system = 0
                       info.external_attr = 0x10 if item.is_dir() else 0x20
                       zout.writestr(info, b"" if item.is_dir() else zin.read(item))

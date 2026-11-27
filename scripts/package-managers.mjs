@@ -166,24 +166,25 @@ const common = {
   bugs: { url: `${HOMEPAGE}/issues` },
 };
 
-function extract(file, dir) {
-  // bsdtar (Windows, macOS) reads zip and tar.gz; GNU tar (Linux) only tar.gz.
+// extract unpacks only the named top-level files: the binary and LICENSE. Leaving the rest
+// (third_party/...) alone also avoids directory entries whose modes a zip made on Windows
+// does not carry.
+function extract(file, dir, names) {
   if (file.endsWith('.zip') && process.platform === 'linux') {
-    execFileSync('unzip', ['-q', '-o', file, '-d', dir], { stdio: 'inherit' });
+    // bsdtar (Windows, macOS) reads zip and tar.gz; GNU tar on Linux only tar.gz.
+    try {
+      execFileSync('unzip', ['-q', '-o', file, ...names, '-d', dir], { stdio: 'inherit' });
+    } catch (e) {
+      if (e.status !== 1) throw e; // 1: warnings only, e.g. backslash paths from Windows tools
+    }
   } else if (process.platform === 'win32') {
     // Windows' own bsdtar: a GNU tar from Git Bash earlier in PATH reads "C:" as a remote host
     const tar = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-    execFileSync(tar, ['-xf', file, '-C', dir], { stdio: 'inherit' });
+    execFileSync(tar, ['-xf', file, '-C', dir, ...names], { stdio: 'inherit' });
   } else {
-    execFileSync('tar', ['-xf', file, '-C', dir], { stdio: 'inherit' });
-  }
-  if (process.platform !== 'win32') {
-    // Zips written on Windows (the signed ones) carry no Unix modes: unzip can leave
-    // directories that cannot even be listed. Give the owner back read/write/search.
-    execFileSync('chmod', ['-R', 'u+rwX', dir], { stdio: 'inherit' });
+    execFileSync('tar', ['-xf', file, '-C', dir, ...names], { stdio: 'inherit' });
   }
 }
-
 function npm() {
   const root = join(out, 'npm');
   rmSync(root, { recursive: true, force: true });
@@ -198,10 +199,10 @@ function npm() {
       if (!existsSync(src)) fail(`${file} is missing from ${dist}`);
       const x = join(tmp, `${p.os}-${p.arch}`);
       mkdirSync(x, { recursive: true });
-      extract(src, x);
+      const exe = p.os === 'windows' ? 'mcpsh.exe' : 'mcpsh';
+      extract(src, x, [exe, 'LICENSE']);
 
       const dir = join(root, `mcpsh-${p.npmOs}-${p.npmCpu}`);
-      const exe = p.os === 'windows' ? 'mcpsh.exe' : 'mcpsh';
       mkdirSync(join(dir, 'bin'), { recursive: true });
       copyFileSync(join(x, exe), join(dir, 'bin', exe));
       if (p.os !== 'windows') chmodSync(join(dir, 'bin', exe), 0o755);
