@@ -72,7 +72,7 @@ which work only after the first tag.
 - self-update: `internal/update`, `internal/cli/selfupdate.go`; `MCPSH_UPDATE_API` and
   `MCPSH_UPDATE_BASE_URL` point it at a fake release in tests.
 - winget: `scripts/package-managers.mjs --only winget` (portable zip manifest, schema 1.10.0,
-  signed builds only) and the `winget` job in `release.yml`.
+  signed builds only) and `.github/workflows/winget.yml`, called by `release.yml` and runnable by hand to retry a tag (`gh workflow run winget.yml -f tag=vX.Y.Z -f submit=true`).
 
 ## Ideas for later
 

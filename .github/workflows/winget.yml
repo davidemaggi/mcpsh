@@ -1,0 +1,112 @@
+name: winget
+
+# Publishes a release to winget: writes the manifests for the signed zips, validates them, installs
+# and checks the package with winget, then opens a PR on microsoft/winget-pkgs (wingetcreate,
+# WINGET_TOKEN). release.yml calls it after the signed build; run it by hand to retry a tag
+# (submit off = build and test only).
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      submit:
+        type: boolean
+        default: true
+    secrets:
+      WINGET_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.1.3
+        required: true
+      submit:
+        description: Submit to winget-pkgs (off = build and test only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: winget-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  winget:
+    name: winget
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      SUBMIT: ${{ inputs.submit && 'true' || 'false' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Write the manifests
+        id: manifests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:VERSION = $env:TAG.TrimStart('v')
+          "VERSION=$env:VERSION" >> $env:GITHUB_ENV
+          gh release download $env:TAG -R $env:GITHUB_REPOSITORY -p 'checksums*.txt' -D dist
+          $released = (gh release view $env:TAG -R $env:GITHUB_REPOSITORY --json publishedAt | ConvertFrom-Json).publishedAt
+          $dir = node scripts/package-managers.mjs --version $env:VERSION --dist dist --out out --only winget --date ([datetime]$released).ToString('yyyy-MM-dd')
+          if ($LASTEXITCODE) { throw 'package-managers.mjs failed' }
+          Get-ChildItem $dir | ForEach-Object { Write-Host "── $($_.Name)"; Get-Content $_.FullName }
+          "dir=$dir" >> $env:GITHUB_OUTPUT
+      - name: Validate, install, check and uninstall with winget
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -Force | Out-Null
+            Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery -Scope CurrentUser
+            Repair-WinGetPackageManager -Latest -Force
+          }
+          winget --version
+          winget settings --enable LocalManifestFiles
+          $dir = '${{ steps.manifests.outputs.dir }}'
+          winget validate --manifest $dir
+          if ($LASTEXITCODE) { throw "winget validate failed ($LASTEXITCODE)" }
+          # winget's own archive scan reports "malware" on the hosted runner, where it cannot
+          # scan for real (v0.1.1). Scan the release zips with Defender here instead, and fail
+          # on a real detection; winget-pkgs runs its own scans on submission.
+          $mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+          if (Test-Path $mp) {
+            & $mp -SignatureUpdate | Out-Null
+            gh release download $env:TAG -R $env:GITHUB_REPOSITORY -p '*_windows_*-signed.zip' -D scan
+            foreach ($zip in Get-ChildItem scan -Filter *.zip) {
+              & $mp -Scan -ScanType 3 -File $zip.FullName -DisableRemediation
+              if ($LASTEXITCODE -eq 2) { throw "Defender found a threat in $($zip.Name)" }
+            }
+          } else {
+            Write-Host "::warning::Defender (MpCmdRun) is not available on this runner: zips not scanned"
+          }
+          winget settings --enable LocalArchiveMalwareScanOverride
+          winget install --manifest $dir --accept-package-agreements --accept-source-agreements --disable-interactivity --silent --ignore-local-archive-malware-scan
+          if ($LASTEXITCODE) { throw "winget install failed ($LASTEXITCODE)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\mcpsh.exe'
+          $said = & $exe version
+          Write-Host $said
+          if (-not ($said -match [regex]::Escape($env:VERSION))) { throw "unexpected version: $said" }
+          # Installed from a local manifest: uninstall by manifest too (by id finds nothing)
+          winget uninstall --manifest $dir --disable-interactivity --silent --accept-source-agreements
+          if ($LASTEXITCODE) { throw "winget uninstall failed ($LASTEXITCODE)" }
+      - name: Submit to winget-pkgs
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:SUBMIT -ne 'true') { Write-Host 'Dry run: nothing submitted'; exit 0 }
+          if (-not $env:WINGET_TOKEN) { Write-Host "::notice::WINGET_TOKEN isn't set: winget skipped"; exit 0 }
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          # The PR comes from the token owner's fork of microsoft/winget-pkgs
+          .\wingetcreate.exe submit --token $env:WINGET_TOKEN '${{ steps.manifests.outputs.dir }}'
+          if ($LASTEXITCODE) { throw "wingetcreate submit failed ($LASTEXITCODE)" }
+
