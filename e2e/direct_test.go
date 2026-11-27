@@ -41,7 +41,7 @@ func TestDiscoveryAndCache(t *testing.T) {
 		e.stopDaemon() // a warm session would keep answering
 		expect(t, e.run("ts", "--help"), 0, "cached", "")
 		expect(t, e.run("ts", "echo", "--help"), 0, "--text string", "")
-		expect(t, e.run("list"), 0, "14", "")
+		expect(t, e.run("list"), 0, strconv.Itoa(len(tools)), "")
 		// A call needs the server: connection error, exit 3, with the server's stderr.
 		expect(t, e.run("ts", "echo", "--text", "x"), 3, "", "refusing to start")
 		// list --check reports it.
@@ -49,7 +49,7 @@ func TestDiscoveryAndCache(t *testing.T) {
 		// refresh fails with exit 3 and keeps the old cache usable.
 		expect(t, e.run("refresh", "ts"), 3, "", "ts:")
 		os.Remove(failFlag)
-		expect(t, e.run("refresh"), 0, "ts: 14 tools", "")
+		expect(t, e.run("refresh"), 0, "ts: "+strconv.Itoa(len(tools))+" tools", "")
 	})
 }
 

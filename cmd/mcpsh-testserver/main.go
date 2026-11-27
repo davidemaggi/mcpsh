@@ -26,6 +26,7 @@ func main() {
 	sseAddr := flag.String("sse", "", "serve legacy SSE on this address")
 	sleep := flag.Bool("sleep", false, "sleep for an hour and exit")
 	delay := flag.Duration("startup-delay", 0, "wait before serving (slow servers)")
+	token := flag.String("require-token", "", "HTTP/SSE: answer 401 unless \"Authorization: Bearer <token>\" is sent")
 	flag.Parse()
 
 	if *sleep {
@@ -46,10 +47,10 @@ func main() {
 	switch {
 	case *httpAddr != "":
 		h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
-		serve(*httpAddr, "/mcp", h)
+		serve(*httpAddr, "/mcp", requireToken(*token, h))
 	case *sseAddr != "":
 		h := mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return server }, nil)
-		serve(*sseAddr, "/sse", h)
+		serve(*sseAddr, "/sse", requireToken(*token, h))
 	default:
 		if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 			log.Fatal(err)
@@ -66,4 +67,17 @@ func serve(addr, path string, h http.Handler) {
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
 	log.Fatal(http.Serve(ln, mux))
+}
+
+func requireToken(token string, h http.Handler) http.Handler {
+	if token == "" {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			http.Error(w, "missing or wrong bearer token", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
