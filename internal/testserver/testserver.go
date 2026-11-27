@@ -141,6 +141,17 @@ func New(exe string) *mcp.Server {
 			return text(os.Getenv(in.Name)), nil, nil
 		})
 
+	type headerIn struct {
+		Name string `json:"name"`
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "header", Description: "Return an HTTP request header received by the server."},
+		func(_ context.Context, req *mcp.CallToolRequest, in headerIn) (*mcp.CallToolResult, any, error) {
+			if req.Extra == nil || req.Extra.Header == nil {
+				return text(""), nil, nil
+			}
+			return text(req.Extra.Header.Get(in.Name)), nil, nil
+		})
+
 	mcp.AddTool(s, &mcp.Tool{Name: "cwd", Description: "Return the server's working directory."},
 		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
 			wd, _ := os.Getwd()

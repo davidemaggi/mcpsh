@@ -18,6 +18,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/davidemaggi/mcpsh/internal/auth"
 	"github.com/davidemaggi/mcpsh/internal/config"
 	"github.com/davidemaggi/mcpsh/internal/proc"
 	"github.com/davidemaggi/mcpsh/internal/version"
@@ -30,6 +31,8 @@ type Options struct {
 	Stderr io.Writer
 	// OnToolsChanged is called when the server sends notifications/tools/list_changed.
 	OnToolsChanged func()
+	// Auth provides OAuth for remote servers; nil means static headers only.
+	Auth auth.Provider
 }
 
 // Conn is a live session with one server.
@@ -38,6 +41,8 @@ type Conn struct {
 	Session *mcp.ClientSession
 	proc    *proc.Process
 	done    chan struct{}
+
+	connCancel context.CancelFunc
 }
 
 // closeGrace is how long a stdio server gets to exit after its stdin closes.
@@ -81,23 +86,36 @@ func Connect(ctx context.Context, rs *config.Resolved, opts Options) (*Conn, err
 		c.proc = p
 		transport = &mcp.IOTransport{Reader: p.Stdout, Writer: p.Stdin}
 	default:
-		return nil, &ConnectError{Server: rs.Name, Err: fmt.Errorf("transport %q is not supported yet", rs.Transport)}
+		t, err := httpTransport(ctx, rs, opts.Auth)
+		if err != nil {
+			return nil, &ConnectError{Server: rs.Name, Err: err}
+		}
+		transport = t
 	}
 
-	cctx, cancel := context.WithTimeout(ctx, rs.StartupTimeout)
-	defer cancel()
+	// Some transports (legacy SSE) tie the connection to the context given to Connect, so it
+	// must live as long as the session: cancellation and the startup timeout are enforced
+	// here instead, and connCancel runs on Close.
+	connCtx, connCancel := context.WithCancel(context.WithoutCancel(ctx))
+	c.connCancel = connCancel
 	type result struct {
 		s   *mcp.ClientSession
 		err error
 	}
 	ch := make(chan result, 1)
 	go func() {
-		s, err := client.Connect(cctx, transport, nil)
+		s, err := client.Connect(connCtx, transport, nil)
 		ch <- result{s, err}
 	}()
+	timer := time.NewTimer(rs.StartupTimeout)
+	defer timer.Stop()
 	var res result
 	select {
 	case res = <-ch:
+	case <-timer.C:
+		res.err = fmt.Errorf("no answer within the startup timeout (%s); raise \"startupTimeout\" if the server is slow to start", rs.StartupTimeout)
+	case <-ctx.Done():
+		res.err = ctx.Err()
 	case <-c.procDone():
 		// The process died during the handshake: no need to wait for the timeout.
 		select {
@@ -107,10 +125,13 @@ func Connect(ctx context.Context, rs *config.Resolved, opts Options) (*Conn, err
 		}
 	}
 	if res.err != nil {
+		connCancel()
+		go func() { // a handshake that completes after we gave up must not leak
+			if late := <-ch; late.s != nil {
+				_ = late.s.Close()
+			}
+		}()
 		err := res.err
-		if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
-			err = fmt.Errorf("no answer within the startup timeout (%s); raise \"startupTimeout\" if the server is slow to start", rs.StartupTimeout)
-		}
 		ce := &ConnectError{Server: rs.Name, Err: err}
 		if c.proc != nil {
 			_ = c.proc.Close(closeGrace)
@@ -194,6 +215,9 @@ func (c *Conn) Close() error {
 		if perr := c.proc.Close(closeGrace); perr != nil {
 			err = perr
 		}
+	}
+	if c.connCancel != nil {
+		c.connCancel()
 	}
 	return err
 }
