@@ -195,6 +195,30 @@ jobs:
           set +e; npx --no-install mcpsh no-such-server >/dev/null 2>&1; code=$?; set -e
           [ "$code" = 2 ] || { echo "::error::the npm launcher returned $code instead of 2"; exit 1; }
 
+      - name: npm packages from Windows-made signed zips
+        if: runner.os == 'Linux'
+        run: |
+          # The signed zips are written by PowerShell on Windows: DOS entries without Unix modes.
+          python3 - "$VERSION" <<'PY'
+          import sys, zipfile, hashlib, pathlib
+          v = sys.argv[1]
+          lines = []
+          for arch in ("amd64", "arm64"):
+              src = pathlib.Path(f"dist/mcpsh_{v}_windows_{arch}.zip")
+              dst = pathlib.Path(f"dist/mcpsh_{v}_windows_{arch}-signed.zip")
+              with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+                  for item in zin.infolist():
+                      info = zipfile.ZipInfo(item.filename, item.date_time)
+                      info.create_system = 0
+                      info.external_attr = 0x10 if item.is_dir() else 0x20
+                      zout.writestr(info, b"" if item.is_dir() else zin.read(item))
+              lines.append(f"{hashlib.sha256(dst.read_bytes()).hexdigest()}  {dst.name}\n")
+          pathlib.Path("dist/checksums-signed.txt").write_text("".join(lines))
+          PY
+          node scripts/package-managers.mjs --version "$VERSION" --dist dist --out out-signed --only npm
+          test -f out-signed/npm/mcpsh-win32-x64/bin/mcpsh.exe
+          rm dist/*-signed.zip dist/checksums-signed.txt
+
       - name: Homebrew cask
         if: runner.os == 'macOS'
         run: |

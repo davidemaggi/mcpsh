@@ -177,6 +177,11 @@ function extract(file, dir) {
   } else {
     execFileSync('tar', ['-xf', file, '-C', dir], { stdio: 'inherit' });
   }
+  if (process.platform !== 'win32') {
+    // Zips written on Windows (the signed ones) carry no Unix modes: unzip can leave
+    // directories that cannot even be listed. Give the owner back read/write/search.
+    execFileSync('chmod', ['-R', 'u+rwX', dir], { stdio: 'inherit' });
+  }
 }
 
 function npm() {

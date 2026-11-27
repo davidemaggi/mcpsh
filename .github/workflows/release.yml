@@ -382,7 +382,22 @@ jobs:
           $dir = '${{ steps.manifests.outputs.dir }}'
           winget validate --manifest $dir
           if ($LASTEXITCODE) { throw "winget validate failed ($LASTEXITCODE)" }
-          winget install --manifest $dir --accept-package-agreements --accept-source-agreements --disable-interactivity --silent
+          # winget's own archive scan reports "malware" on the hosted runner, where it cannot
+          # scan for real (v0.1.1). Scan the release zips with Defender here instead, and fail
+          # on a real detection; winget-pkgs runs its own scans on submission.
+          $mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+          if (Test-Path $mp) {
+            & $mp -SignatureUpdate | Out-Null
+            gh release download $env:TAG -R $env:GITHUB_REPOSITORY -p '*_windows_*-signed.zip' -D scan
+            foreach ($zip in Get-ChildItem scan -Filter *.zip) {
+              & $mp -Scan -ScanType 3 -File $zip.FullName -DisableRemediation
+              if ($LASTEXITCODE -eq 2) { throw "Defender found a threat in $($zip.Name)" }
+            }
+          } else {
+            Write-Host "::warning::Defender (MpCmdRun) is not available on this runner: zips not scanned"
+          }
+          winget settings --enable LocalArchiveMalwareScanOverride
+          winget install --manifest $dir --accept-package-agreements --accept-source-agreements --disable-interactivity --silent --ignore-local-archive-malware-scan
           if ($LASTEXITCODE) { throw "winget install failed ($LASTEXITCODE)" }
           $exe = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\mcpsh.exe'
           $said = & $exe version
