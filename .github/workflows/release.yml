@@ -175,16 +175,18 @@ jobs:
             if ($LASTEXITCODE) { Show-Certificates; throw "signtool sign failed ($LASTEXITCODE)" }
             & $signtool verify /pa /all $exe
             if ($LASTEXITCODE) { throw "signtool verify failed ($LASTEXITCODE)" }
-            # Same content and layout as the unsigned zip, with the signed exe
-            $signed = Join-Path out ($name -replace '\.zip$', '-signed.zip')
-            Compress-Archive -Path (Join-Path $dir '*') -DestinationPath $signed
+            # Only the signed exe goes back: the zips are rebuilt on Linux from GoReleaser's own,
+            # because Windows PowerShell's Compress-Archive writes backslash paths.
+            $arch = if ($name -match '_arm64\.zip$') { 'arm64' } else { 'amd64' }
+            New-Item -ItemType Directory (Join-Path out $arch) | Out-Null
+            Copy-Item $exe (Join-Path out "$arch\mcpsh.exe")
           }
-          Get-ChildItem out
+          Get-ChildItem -Recurse out
       - uses: actions/upload-artifact@v7
         id: upload
         with:
-          name: windows-signed
-          path: out/*-signed.zip
+          name: windows-signed-exe
+          path: out/
           if-no-files-found: error
           retention-days: 1
       - name: Empty the workspace again
@@ -208,8 +210,27 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           artifact-ids: ${{ needs.sign.outputs.artifact }}
-          merge-multiple: true
-          path: signed
+          path: signed-exe
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-unsigned
+          path: unsigned
+      - name: Rebuild the zips with the signed exe
+        env:
+          VERSION: ${{ needs.goreleaser.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p signed
+          for arch in amd64 arm64; do
+            base="mcpsh_${VERSION}_windows_${arch}"
+            test -f "signed-exe/$arch/mcpsh.exe"
+            rm -rf "work/$arch" && mkdir -p "work/$arch"
+            unzip -q "unsigned/$base.zip" -d "work/$arch"
+            cp "signed-exe/$arch/mcpsh.exe" "work/$arch/mcpsh.exe"
+            # Same entries, in the same order, as GoReleaser's zip
+            (cd "work/$arch" && unzip -Z1 "$GITHUB_WORKSPACE/unsigned/$base.zip" | grep -v '/$' | zip -X -q "$GITHUB_WORKSPACE/signed/$base-signed.zip" -@)
+            unzip -l "signed/$base-signed.zip"
+          done
       - name: Checksums
         working-directory: signed
         run: |
@@ -403,7 +424,8 @@ jobs:
           $said = & $exe version
           Write-Host $said
           if (-not ($said -match [regex]::Escape($env:VERSION))) { throw "unexpected version: $said" }
-          winget uninstall --id DavideMaggi.mcpsh --disable-interactivity --silent
+          winget uninstall --id DavideMaggi.mcpsh --disable-interactivity --silent --accept-source-agreements
+          if ($LASTEXITCODE) { throw "winget uninstall failed ($LASTEXITCODE)" }
       - name: Submit to winget-pkgs
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
