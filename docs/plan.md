@@ -69,16 +69,24 @@ Each phase lands as one PR; CI (Linux, macOS, Windows) must be green before the 
    `daemon start|stop|status|restart|logs`, rotating logs with redaction; lifecycle tests.
 3. **HTTP.** Streamable HTTP, legacy SSE, custom headers, auth provider seam (no OAuth yet),
    `tools/list_changed` refreshing the cache; HTTP/SSE e2e on both engines.
-4. **Skills.** `skill install`, `skill generate <server>`, `agents-md`.
-5. **Release.** GoReleaser, signing, Homebrew, Scoop, install.sh / install.ps1, README final pass
-   (real install commands, demo recording).
+4. **Skills.** `skill install`, `skill generate <server>`, `agents-md`. Two Skills: `mcpsh`
+   (use configured servers, progressive disclosure) and `mcpsh-setup` (given an MCP package, URL,
+   README or `.mcp.json` snippet, guide the agent through `mcpsh add` with `${VAR}` secrets, scope,
+   trust, tool filters, `list --check`, and optionally `skill generate`). Both also live in the repo
+   under `skills/<name>/SKILL.md`, generated from the same templates (a test keeps them in sync), so
+   `npx skills add davidemaggi/mcpsh` installs them; the Skills offer to install the `mcpsh`
+   binary when it is missing (with the user's consent).
+5. **Release.** GoReleaser, signing, Homebrew, Scoop, install.sh / install.ps1, npm package
+   `@davidemaggi/mcpsh` (launcher + per-platform `optionalDependencies`, no postinstall, trusted
+   publishing with provenance if available, published only after the Windows binaries are signed),
+   README final pass (real install commands, demo recording).
 6. **Later.** OAuth (SDK `auth.AuthorizationCodeHandler`, client-side support is experimental),
    resources and prompts, `self-update`, winget.
 
 ## Risks to check early
 
 - `.cmd` shims on Windows (`npx.cmd`): argument escaping through `cmd.exe` (phase 1 test).
-- The SDK caches `tools/list` per session under protocol 2026-07-28; the daemon's `refresh`
-  must bypass it (phase 2).
+- The SDK caches `tools/list` per session under protocol 2026-07-28, but only when the server
+  sends a positive `ttlMs`, and drops it on `tools/list_changed`: `refresh` honours that hint.
 - Agents' terminals or CI may run mcpsh inside a job object that forbids breakaway, so the
   daemon dies with the terminal; the CLI restarts it transparently and the daemon logs it.
