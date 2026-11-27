@@ -203,6 +203,8 @@ jobs:
           sed -i '' "s|https://github.com/davidemaggi/mcpsh/releases/download/v#{version}/|file://$PWD/dist/|" out/homebrew/Casks/mcpsh.rb
           cat out/homebrew/Casks/mcpsh.rb
           brew tap-new --no-git ci/local
+          # Newer Homebrew refuses casks from taps it was not told to trust
+          if brew commands | grep -qx trust; then brew trust ci/local; fi
           tapdir="$(brew --repository)/Library/Taps/ci/homebrew-local"
           mkdir -p "$tapdir/Casks" && cp out/homebrew/Casks/mcpsh.rb "$tapdir/Casks/"
           brew style --cask ci/local/mcpsh
