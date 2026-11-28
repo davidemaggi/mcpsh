@@ -8,6 +8,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,12 @@ func (s *Server) Validate() error {
 	case TransportHTTP, TransportSSE:
 		if s.URL == "" {
 			return fmt.Errorf("%s server needs a \"url\"", s.TransportType())
+		}
+		if !HasReference(s.URL) {
+			u, err := url.Parse(s.URL)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				return fmt.Errorf("\"url\" must be an absolute http:// or https:// URL, not %q", s.URL)
+			}
 		}
 	default:
 		return fmt.Errorf("unknown transport type %q (use stdio, http or sse)", s.Type)

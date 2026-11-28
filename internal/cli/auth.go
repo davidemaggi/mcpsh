@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -71,6 +72,12 @@ func (a *App) authLoginCmd() *cobra.Command {
 			defer cancel()
 			conn, err := mcpclient.Connect(ctx, &lrs, mcpclient.Options{Logger: a.logger, Auth: login})
 			if err != nil {
+				if strings.Contains(err.Error(), "failed to register client") && rs.OAuth.ClientID == "" {
+					// Some providers (Figma, for one) only register clients they have approved.
+					return usagef("", fmt.Sprintf("the authorization server of %q refused to register mcpsh as a client (%v). "+
+						"It only accepts clients it knows: ask the provider to allow mcpsh, or configure a client it gave you with "+
+						"\"oauth\": {\"clientId\": \"...\", \"clientSecret\": \"${SECRET}\"}", rs.Name, lastPart(err.Error())))
+				}
 				return err
 			}
 			tools, err := conn.ListTools(ctx)
@@ -86,6 +93,14 @@ func (a *App) authLoginCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// lastPart keeps the end of a chain of wrapped errors ("a: b: c" -> "c").
+func lastPart(s string) string {
+	if i := strings.LastIndex(s, "registration failed"); i >= 0 {
+		return s[i:]
+	}
+	return s
 }
 
 func (a *App) authLogoutCmd() *cobra.Command {
