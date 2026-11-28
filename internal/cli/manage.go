@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -182,14 +183,14 @@ func (a *App) addCmd() *cobra.Command {
 		Use:   "add <name> [flags] -- <command> [args...] | add <name> --url <url>",
 		Short: "Add a server to the user or project config",
 		Example: `  mcpsh add fs -- npx -y @modelcontextprotocol/server-filesystem .
-  mcpsh add github --url https://api.githubcopilot.com/mcp/ --header "Authorization: Bearer ${GITHUB_TOKEN}"
+  mcpsh add github --url https://api.githubcopilot.com/mcp/ --header 'Authorization: Bearer ${GITHUB_TOKEN}'
   mcpsh add tracker --scope project --env API_KEY='${TRACKER_KEY}' -- uvx tracker-mcp`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			dash := cmd.ArgsLenAtDash()
-			if dash > 1 {
-				return usagef("see mcpsh add --help", "put the server command after \"--\"")
+			if dash > 1 || (dash < 0 && len(args) > 1) {
+				return usagef("see mcpsh add --help", fmt.Sprintf("unexpected argument %q: a server command goes after \"--\", a URL after --url", args[1]))
 			}
 			var command []string
 			if dash == 1 {
@@ -219,6 +220,12 @@ func (a *App) addCmd() *cobra.Command {
 			}
 			if s.Headers, err = parsePairs(headers, ":", "--header"); err != nil {
 				return err
+			}
+			if err := emptyCredential(s.Headers); err != nil {
+				return err
+			}
+			if err := s.Validate(); err != nil {
+				return usagef("see mcpsh add --help", err.Error())
 			}
 			path, sc, err := a.scopeFile(scope)
 			if err != nil {
@@ -294,6 +301,22 @@ func (a *App) scopeFile(scope string) (string, config.Scope, error) {
 }
 
 // ---- remove ----
+
+// emptyCredential catches an auth header whose token vanished: a shell expands "${VAR}" inside
+// double quotes (PowerShell even when VAR is only an environment variable), leaving "Bearer".
+func emptyCredential(headers map[string]string) error {
+	for k, v := range headers {
+		if !config.LooksSecret(k) {
+			continue
+		}
+		f := strings.Fields(v)
+		if len(f) == 0 || (len(f) == 1 && slices.Contains([]string{"bearer", "basic", "token"}, strings.ToLower(f[0]))) {
+			return usagef("", fmt.Sprintf(
+				"header %s has no credential (%q): the shell probably expanded ${VAR} before mcpsh saw it; quote it with single quotes, e.g. --header '%s: Bearer ${MY_TOKEN}'", k, v, k))
+		}
+	}
+	return nil
+}
 
 func (a *App) removeCmd() *cobra.Command {
 	var scope string
